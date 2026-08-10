@@ -1,0 +1,29 @@
+id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+description: docs/spec/nodes/l1-transformer-policy.md
+level: L1
+scope: pure-rl-shortest-path/transformer-policy
+realization: unimplemented
+parent: 019feb83-80f6-786a-bf25-d637dd4a6af1
+anchors:
+  - id: 019feb9e-e54d-7694-9f5e-9551f8a9ca15
+    selector:
+      quote: |-
+        The transformer policy is the trainable system that maps a serialized graph and
+        source–target query to an autoregressively generated reasoning trace and final
+        path. It begins from randomly initialized parameters and generates its
+        completion without task-specific token masks, forced actions, or access to a
+        shortest-path oracle.
+    links:
+      - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
+        kind: informational
+  - id: 019feb9e-e54d-715e-a5c6-d700ae9f0d77
+    selector:
+      quote: |-
+        The policy exposes the same generation behavior to training and evaluation,
+        with sampling choices controlled by the surrounding experiment. Its
+        configuration and learned state can be saved and restored together so a
+        checkpoint identifies a reproducible policy rather than an unexplained
+        collection of weights.
+    links:
+      - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
+        kind: informational

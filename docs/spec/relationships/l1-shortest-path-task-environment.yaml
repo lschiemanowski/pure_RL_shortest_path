@@ -1,0 +1,30 @@
+id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+description: docs/spec/nodes/l1-shortest-path-task-environment.md
+level: L1
+scope: pure-rl-shortest-path/task-environment
+realization: unimplemented
+parent: 019feb83-80f6-786a-bf25-d637dd4a6af1
+anchors:
+  - id: 019feb9e-e54d-76c8-baa4-43eba9f5616a
+    selector:
+      quote: |-
+        The shortest-path task environment defines the problems on which policies are
+        trained and evaluated. It produces synthetic connected, undirected, unweighted
+        graphs with source–target queries, represents each problem for the policy,
+        interprets generated reasoning traces and final paths, and derives the exact
+        graph facts needed to assess a completion.
+    links:
+      - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
+        kind: informational
+  - id: 019feb9e-e54d-7974-aeee-a70255a93aee
+    selector:
+      quote: |-
+        The environment distinguishes abstract graph structure from the labels used to
+        represent vertices, so changes in graph size or required distance are not
+        confused with vocabulary exposure. It reports facts such as format correctness,
+        path validity, path length, and optimality without deciding how those facts are
+        combined into rewards or other learning objectives. Training and evaluation use
+        the same declared task semantics.
+    links:
+      - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
+        kind: informational

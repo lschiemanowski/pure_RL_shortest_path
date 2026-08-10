@@ -1,0 +1,31 @@
+id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+description: docs/spec/nodes/l1-experiment-protocol-and-evidence.md
+level: L1
+scope: pure-rl-shortest-path/experiment-protocol-and-evidence
+realization: unimplemented
+parent: 019feb83-80f6-786a-bf25-d637dd4a6af1
+anchors:
+  - id: 019feb9e-e54d-7876-813a-dd66947f9e39
+    selector:
+      quote: |-
+        The experiment protocol and evidence system turns task, policy, and trainer
+        configurations into reproducible training and evaluation runs. It records the
+        task and vocabulary semantics, model and learning configuration, random seeds,
+        source revision, run lineage, metrics, checkpoints, and representative
+        completions needed to resume or audit a run.
+    links:
+      - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
+        kind: informational
+  - id: 019feb9e-e54d-7148-b354-a27dd5bbeef3
+    selector:
+      quote: |-
+        Evaluation measures a selected policy on fresh or fixed independently generated
+        problems without updating it. It reports formatting, valid-path, and
+        shortest-path performance separately and retains the identities of the policy,
+        problem distribution, and evaluation protocol behind each result. Comparisons
+        across curriculum stages, graph scales, model variants, and learning signals use
+        compatible evidence and expose rather than conceal relevant experimental
+        differences.
+    links:
+      - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
+        kind: informational
