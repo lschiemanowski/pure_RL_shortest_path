@@ -1,0 +1,8 @@
+schema_version: 8
+descriptions: docs/spec/nodes
+relationships: docs/spec/relationships
+reconciliations: docs/spec/reconciliations
+code:
+  roots:
+    - path: src
+      extensions: [.py]
