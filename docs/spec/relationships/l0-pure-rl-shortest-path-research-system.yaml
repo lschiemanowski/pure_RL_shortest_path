@@ -4,31 +4,46 @@ level: L0
 scope: pure-rl-shortest-path/research-system
 realization: unimplemented
 anchors:
-  - id: 019feb9e-e54d-73f3-8b69-fcacea09dd3f
+  - id: 019febad-236e-723c-8a9f-99e6915de543
     selector:
       quote: |-
         The system is a local command-line research environment for controlled
-        experiments in which a transformer initialized from scratch is trained by
-        reinforcement learning to find shortest paths in synthetic connected,
-        undirected, unweighted graphs. A researcher launches training and evaluation
-        runs and later inspects their metrics, checkpoints, and generated solutions.
+        experiments into whether a transformer can learn to find shortest paths through
+        reinforcement learning. A researcher launches training and evaluation runs and
+        later inspects their metrics, checkpoints, and generated solutions.
+    links:
+      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
+  - id: 019feb9e-e54d-73f3-8b69-fcacea09dd3f
+    selector:
+      quote: |-
+        Experiments use synthetic connected, undirected, unweighted graphs with
+        source–target queries. Each problem is serialized under declared task and
+        vocabulary semantics, and generated reasoning traces and final paths can be
+        assessed exactly for format correctness, path validity, path length, and
+        optimality.
     links:
       - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
         kind: informational
+  - id: 019febad-236e-7273-8bcc-cbf5df414d4d
+    selector:
+      quote: |-
+        A transformer policy initialized from scratch receives the
+        serialized problem and freely generates its completion without task-specific
+        token masks, forced actions, or access to a shortest-path oracle.
+    links:
       - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
         kind: informational
   - id: 019feb9e-e54d-74ca-83b2-827a424c0efe
     selector:
       quote: |-
-        Reinforcement learning is the model-training mechanism. During training, the
-        current policy receives serialized graphs with source–target queries and freely
-        samples reasoning traces and final paths. The system evaluates those sampled
-        completions using automatically computed graph feedback and uses that feedback
-        to update the policy. Training uses no pretrained weights, demonstrated
-        solutions, teacher reasoning, or supervised target completions. Verifier
-        reward, reward shaping, and auxiliary graph-derived objectives are individually
-        named and configurable, so each experiment states precisely which learning
-        signals it uses.
+        Reinforcement learning is the model-training mechanism. The current policy
+        samples its own completions, the system derives declared graph feedback from
+        them, and that feedback is used to update the policy. Training uses no
+        pretrained weights, demonstrated solutions, teacher reasoning, or supervised
+        target completions. Verifier reward, reward shaping, and auxiliary graph-derived
+        objectives are individually named and configurable, so each experiment states
+        precisely which learning signals it uses.
     links:
       - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
         kind: informational
@@ -36,13 +51,14 @@ anchors:
     selector:
       quote: |-
         Each run preserves enough information to reproduce and audit its result,
-        including task and vocabulary semantics, configuration, random seeds,
-        checkpoints, metrics, and representative completions. Evaluation uses fresh or
-        fixed independently generated examples and reports formatting success,
+        including task and vocabulary semantics, configuration, random seeds, source
+        revision, run lineage, checkpoints, metrics, and representative completions.
+        Evaluation measures selected policies without updating them, using fresh or
+        fixed independently generated problems, and reports formatting success,
         valid-path success, and shortest-path success separately. Comparisons across
-        curriculum stages, graph scales, model variants, and learning signals avoid
-        known confounds such as introducing previously untrained node labels only at
-        larger graph sizes.
+        curriculum stages, graph scales, model variants, and learning signals use
+        compatible evidence and expose known confounds such as introducing previously
+        untrained node labels only at larger graph sizes.
     links:
       - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
         kind: informational

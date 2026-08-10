@@ -1,0 +1,31 @@
+id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
+description: docs/spec/nodes/l2-completion-protocol.md
+level: L2
+scope: pure-rl-shortest-path/task-environment/completion-protocol
+realization: unimplemented
+parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
+references:
+  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+    kind: contractual
+anchors:
+  - id: 019febb9-f9e2-73ef-91ad-b5489893d15f
+    selector:
+      quote: |-
+        A completion contains a reasoning segment followed by a final-answer segment
+        and explicit termination. The reasoning segment represents one or more graph
+        walks separated by restart markers, while the final answer is a nonempty
+        sequence of node labels intended to describe a path from the query source to
+        its target.
+    links:
+      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+        kind: informational
+  - id: 019febb9-f9e2-7a6a-8375-c4a99c0d8418
+    selector:
+      quote: |-
+        Parsing either returns the reasoning walks and answer path in structured form
+        or reports a format failure. It determines only syntactic well-formedness;
+        whether transitions are legal and whether the answer is correct or shortest
+        belong to outcome verification.
+    links:
+      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+        kind: informational

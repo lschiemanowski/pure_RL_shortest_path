@@ -9,22 +9,43 @@ anchors:
     selector:
       quote: |-
         The shortest-path task environment defines the problems on which policies are
-        trained and evaluated. It produces synthetic connected, undirected, unweighted
-        graphs with source–target queries, represents each problem for the policy,
-        interprets generated reasoning traces and final paths, and derives the exact
-        graph facts needed to assess a completion.
+        trained and evaluated while keeping task meaning and correctness independent of
+        any policy architecture or learning algorithm.
     links:
       - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
         kind: informational
-  - id: 019feb9e-e54d-7974-aeee-a70255a93aee
+  - id: 019febb9-f9e2-74b4-bb7f-8039ab114c27
     selector:
       quote: |-
-        The environment distinguishes abstract graph structure from the labels used to
-        represent vertices, so changes in graph size or required distance are not
-        confused with vocabulary exposure. It reports facts such as format correctness,
-        path validity, path length, and optimality without deciding how those facts are
-        combined into rewards or other learning objectives. Training and evaluation use
-        the same declared task semantics.
+        Its graph problem distribution produces reproducible abstract graph and query
+        instances with declared size, density, and shortest-distance constraints.
     links:
-      - id: 019feb83-80f6-786a-bf25-d637dd4a6af1
+      - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
+        kind: informational
+  - id: 019febb9-f9e2-7399-9a4e-3a57b737f789
+    selector:
+      quote: |-
+        The task and vocabulary representation maps each abstract instance into the
+        policy's input space without allowing label exposure to encode curriculum
+        difficulty.
+    links:
+      - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+        kind: informational
+  - id: 019febb9-f9e2-79e9-9d8d-853bfe287bd5
+    selector:
+      quote: |-
+        The completion protocol defines how freely generated token
+        sequences are interpreted as reasoning traces and final paths.
+    links:
+      - id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
+        kind: informational
+  - id: 019febb9-f9e2-7470-ba33-1c75110df318
+    selector:
+      quote: |-
+        Outcome verification derives exact format, path-validity, length, optimality,
+        and reasoning-trace facts from an instance and completion. The environment
+        reports those facts without combining them into rewards or other learning
+        objectives, and training and evaluation use the same declared task semantics.
+    links:
+      - id: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
         kind: informational
