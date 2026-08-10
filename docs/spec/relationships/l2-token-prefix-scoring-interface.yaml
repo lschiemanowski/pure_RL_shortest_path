@@ -1,0 +1,34 @@
+id: 019fec29-efaa-756e-a1a3-12c4676ea60a
+description: docs/spec/nodes/l2-token-prefix-scoring-interface.md
+level: L2
+scope: pure-rl-shortest-path/transformer-policy/token-prefix-scoring-interface
+realization: unimplemented
+parent: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+references:
+  - id: 019fec29-efaa-7969-8feb-594a61b8874d
+    kind: contractual
+  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+    kind: contractual
+anchors:
+  - id: 019fec29-efaa-71b1-b720-f1b59be0b736
+    selector:
+      quote: |-
+        The scoring interface accepts batches of token prefixes together with an
+        optional padding mask and optional cached attention state. It returns next-token
+        scores over the complete configured vocabulary at every supplied position and,
+        when requested, the updated attention state. It rejects an effective prefix
+        longer than the model's configured context limit.
+    links:
+      - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+        kind: informational
+  - id: 019fec29-efaa-78dd-8b9c-5c9f38e964bf
+    selector:
+      quote: |-
+        Scores are causal: a position depends only on its non-padding prefix. Full-prefix
+        and incremental cached evaluation represent the same policy for the same
+        effective input. The interface returns scores only; the invoking process owns
+        token selection, score masking or forcing, and stopping decisions. It does not
+        parse completions, consult graph verification, or access shortest-path answers.
+    links:
+      - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+        kind: informational

@@ -1,13 +1,13 @@
 # Transformer policy
 
-The transformer policy is the trainable system that maps a serialized graph and
-source–target query to an autoregressively generated reasoning trace and final
-path. It begins from randomly initialized parameters and generates its
-completion without task-specific token masks, forced actions, or access to a
-shortest-path oracle.
+The transformer policy is the trainable part of the system. It contains no
+task-specific verifier, shortest-path oracle, demonstrated solution, or
+mechanism for looking up a correct next action.
 
-The policy exposes the same generation behavior to training and evaluation,
-with sampling choices controlled by the surrounding experiment. Its
-configuration and learned state can be saved and restored together so a
-checkpoint identifies a reproducible policy rather than an unexplained
-collection of weights.
+Its transformer model owns the declared decoder-only causal architecture,
+random initialization, and learned parameters that identify the current policy.
+
+Its token-prefix scoring interface maps serialized token prefixes to next-token
+scores over the complete task vocabulary. Training and evaluation use the same
+scoring interface; the invoking process owns sampling, token constraints, and
+termination behavior.
