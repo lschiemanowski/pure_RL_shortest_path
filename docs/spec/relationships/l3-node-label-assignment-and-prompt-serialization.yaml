@@ -1,0 +1,156 @@
+id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
+description: docs/spec/nodes/l3-node-label-assignment-and-prompt-serialization.md
+level: L3
+scope: pure-rl-shortest-path/task-environment/task-and-vocabulary-representation/node-label-assignment-and-prompt-serialization
+realization: implemented
+parent: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+covers:
+  - path: src/pure_rl_shortest_path/task.py
+    selector:
+      quote: |-
+        def label_and_serialize_problem(
+            problem: AbstractGraphProblem,
+            vocabulary: Vocabulary,
+            rng: random.Random,
+        ) -> GraphExample:
+            """Assign labels from the full pool and serialize a solution-free prompt."""
+
+            if problem.vertex_count > vocabulary.node_label_count:
+                raise ValueError(
+                    f"problem needs {problem.vertex_count} labels but the vocabulary has "
+                    f"{vocabulary.node_label_count}"
+                )
+            label_by_vertex = tuple(
+                rng.sample(range(vocabulary.node_label_count), problem.vertex_count)
+            )
+            labeled_edges = tuple(
+                sorted(
+                    canonical_edge(label_by_vertex[u], label_by_vertex[v])
+                    for u, v in problem.edges
+                )
+            )
+            serialized_edges = list(labeled_edges)
+            rng.shuffle(serialized_edges)
+            serialized_edges = [
+                (v, u) if rng.random() < 0.5 else (u, v) for u, v in serialized_edges
+            ]
+            source = label_by_vertex[problem.source]
+            target = label_by_vertex[problem.target]
+            prompt = [BOS, EDGES]
+            for u, v in serialized_edges:
+                prompt.extend((vocabulary.node_token(u), vocabulary.node_token(v)))
+            prompt.extend(
+                (
+                    QUERY,
+                    vocabulary.node_token(source),
+                    vocabulary.node_token(target),
+                    BEGIN_REASON,
+                    vocabulary.node_token(source),
+                )
+            )
+            adjacency_mutable = [set() for _ in range(vocabulary.node_label_count)]
+            for u, v in labeled_edges:
+                adjacency_mutable[u].add(v)
+                adjacency_mutable[v].add(u)
+            return GraphExample(
+                problem=problem,
+                label_by_vertex=label_by_vertex,
+                active_labels=tuple(sorted(label_by_vertex)),
+                edges=labeled_edges,
+                serialized_edges=tuple(serialized_edges),
+                source=source,
+                target=target,
+                prompt=tuple(prompt),
+                adjacency=tuple(frozenset(neighbors) for neighbors in adjacency_mutable),
+            )
+anchors:
+  - id: 019ff0e2-9b56-71ed-91e7-df7ad52bd1e7
+    selector:
+      quote: |-
+        Each abstract graph receives a fresh injective mapping from its vertices into
+        the complete configured node-label pool. The active labels are sampled uniformly
+        without replacement from that pool, independently of curriculum stage. The
+        mapping is applied consistently to edges, source, target, completion
+        interpretation, and verification.
+    links:
+      - path: src/pure_rl_shortest_path/task.py
+        kind: contractual
+        code_anchor: 019ff0e2-9b56-7224-a7e1-c5b2bff9163c
+        selector:
+          quote: |-
+            def label_and_serialize_problem(
+                problem: AbstractGraphProblem,
+                vocabulary: Vocabulary,
+                rng: random.Random,
+            ) -> GraphExample:
+                """Assign labels from the full pool and serialize a solution-free prompt."""
+
+                if problem.vertex_count > vocabulary.node_label_count:
+                    raise ValueError(
+                        f"problem needs {problem.vertex_count} labels but the vocabulary has "
+                        f"{vocabulary.node_label_count}"
+                    )
+                label_by_vertex = tuple(
+                    rng.sample(range(vocabulary.node_label_count), problem.vertex_count)
+                )
+                labeled_edges = tuple(
+                    sorted(
+                        canonical_edge(label_by_vertex[u], label_by_vertex[v])
+                        for u, v in problem.edges
+                    )
+                )
+  - id: 019ff0e2-9b56-71ec-b467-7de22d3ece53
+    selector:
+      quote: |-
+        After labeling, edge order is shuffled and each undirected edge is independently
+        assigned either orientation for serialization. The prompt begins with the graph
+        edge sequence, then gives the source–target query, and ends by opening the
+        reasoning segment at the source node. It contains no path, target completion,
+        shortest distance, or other solution information. Generated policy tokens begin
+        after the final source token.
+    links:
+      - path: src/pure_rl_shortest_path/task.py
+        kind: contractual
+        code_anchor: 019ff0e2-9b56-7fc6-94ce-246d930f59b1
+        selector:
+          quote: |-
+            def label_and_serialize_problem(
+                problem: AbstractGraphProblem,
+                vocabulary: Vocabulary,
+                rng: random.Random,
+            ) -> GraphExample:
+                """Assign labels from the full pool and serialize a solution-free prompt."""
+
+                if problem.vertex_count > vocabulary.node_label_count:
+                    raise ValueError(
+                        f"problem needs {problem.vertex_count} labels but the vocabulary has "
+                        f"{vocabulary.node_label_count}"
+                    )
+                label_by_vertex = tuple(
+                    rng.sample(range(vocabulary.node_label_count), problem.vertex_count)
+                )
+                labeled_edges = tuple(
+                    sorted(
+                        canonical_edge(label_by_vertex[u], label_by_vertex[v])
+                        for u, v in problem.edges
+                    )
+                )
+                serialized_edges = list(labeled_edges)
+                rng.shuffle(serialized_edges)
+                serialized_edges = [
+                    (v, u) if rng.random() < 0.5 else (u, v) for u, v in serialized_edges
+                ]
+                source = label_by_vertex[problem.source]
+                target = label_by_vertex[problem.target]
+                prompt = [BOS, EDGES]
+                for u, v in serialized_edges:
+                    prompt.extend((vocabulary.node_token(u), vocabulary.node_token(v)))
+                prompt.extend(
+                    (
+                        QUERY,
+                        vocabulary.node_token(source),
+                        vocabulary.node_token(target),
+                        BEGIN_REASON,
+                        vocabulary.node_token(source),
+                    )
+                )

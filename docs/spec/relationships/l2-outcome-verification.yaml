@@ -2,7 +2,7 @@ id: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
 description: docs/spec/nodes/l2-outcome-verification.md
 level: L2
 scope: pure-rl-shortest-path/task-environment/outcome-verification
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
 references:
   - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
@@ -20,7 +20,7 @@ anchors:
         independently computes the true shortest distance, and determines optimality and
         excess length.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
         kind: informational
   - id: 019febb9-f9e2-7446-ad10-4d4f1031e916
     selector:
@@ -31,5 +31,5 @@ anchors:
         deterministic and shared by training and evaluation. Verification never assigns
         a scalar reward or trusts a policy-generated claim about correctness.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
         kind: informational

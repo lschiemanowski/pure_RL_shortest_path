@@ -2,7 +2,7 @@ id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
 description: docs/spec/nodes/l2-graph-problem-distribution.md
 level: L2
 scope: pure-rl-shortest-path/task-environment/graph-problem-distribution
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
 anchors:
   - id: 019febb9-f9e2-7820-a0fd-7ca482a0eeb6
@@ -14,7 +14,7 @@ anchors:
         counts, plus distinct active source and target vertices whose distance lies in
         the declared interval.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-7255-8803-6584184653db
         kind: informational
   - id: 019febb9-f9e2-7d73-aeb5-e08e9a96d9da
     selector:
@@ -27,5 +27,5 @@ anchors:
         explicitly; it never returns an instance outside the declared vertex, edge, or
         distance constraints.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-7255-8803-6584184653db
         kind: informational

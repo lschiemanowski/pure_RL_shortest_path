@@ -2,7 +2,7 @@ id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
 description: docs/spec/nodes/l2-task-and-vocabulary-representation.md
 level: L2
 scope: pure-rl-shortest-path/task-environment/task-and-vocabulary-representation
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
 references:
   - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
@@ -17,7 +17,7 @@ anchors:
         assignment is applied consistently to the graph, query, and completion
         semantics, and it preserves the underlying shortest-path problem.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
         kind: informational
   - id: 019febb9-f9e2-7de0-bce8-a6571ec410bf
     selector:
@@ -28,5 +28,5 @@ anchors:
         are identical in training and evaluation and are recorded as part of the task
         configuration.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
         kind: informational

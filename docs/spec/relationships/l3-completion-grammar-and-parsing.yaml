@@ -1,0 +1,188 @@
+id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
+description: docs/spec/nodes/l3-completion-grammar-and-parsing.md
+level: L3
+scope: pure-rl-shortest-path/task-environment/completion-protocol/completion-grammar-and-parsing
+realization: implemented
+parent: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
+covers:
+  - path: src/pure_rl_shortest_path/task.py
+    selector:
+      quote: |-
+        def parse_completion(
+            completion: Sequence[int], vocabulary: Vocabulary
+        ) -> ParsedCompletion:
+            """Parse generated tokens without consulting a graph or judging correctness."""
+
+            tokens = list(completion)
+            if not tokens or tokens[-1] != EOS or EOS in tokens[:-1]:
+                return _format_failure("completion must end with exactly one EOS")
+            try:
+                end_reason = tokens.index(END_REASON)
+            except ValueError:
+                return _format_failure("completion has no END_REASON")
+            reasoning_tokens = tokens[:end_reason]
+            if not reasoning_tokens:
+                return _format_failure("reasoning segment must be nonempty")
+
+            walks: list[tuple[int, ...]] = []
+            current_walk: list[int] = []
+            for token in reasoning_tokens:
+                if token == JUMP:
+                    if not current_walk:
+                        return _format_failure("JUMP must follow a nonempty reasoning walk")
+                    walks.append(tuple(current_walk))
+                    current_walk = []
+                    continue
+                label = vocabulary.token_node(token)
+                if label is None:
+                    return _format_failure("reasoning segment contains a non-node token")
+                current_walk.append(label)
+            if not current_walk:
+                return _format_failure("JUMP must be followed by a node label")
+            walks.append(tuple(current_walk))
+
+            suffix = tokens[end_reason + 1 :]
+            if not suffix or suffix[0] != BEGIN_ANSWER:
+                return _format_failure("END_REASON must be followed by BEGIN_ANSWER")
+            try:
+                end_answer = suffix.index(END_ANSWER, 1)
+            except ValueError:
+                return _format_failure("answer segment has no END_ANSWER")
+            if suffix[end_answer + 1 :] != [EOS]:
+                return _format_failure("END_ANSWER must be followed immediately by EOS")
+            answer_tokens = suffix[1:end_answer]
+            if not answer_tokens:
+                return _format_failure("answer path must be nonempty")
+            answer: list[int] = []
+            for token in answer_tokens:
+                label = vocabulary.token_node(token)
+                if label is None:
+                    return _format_failure("answer segment contains a non-node token")
+                answer.append(label)
+            return ParsedCompletion(
+                format_ok=True,
+                reasoning_tokens=tuple(reasoning_tokens),
+                reasoning_walks=tuple(walks),
+                answer=tuple(answer),
+                format_error=None,
+            )
+anchors:
+  - id: 019ff0e2-9b56-7af7-bbce-4c13187429d2
+    selector:
+      quote: |-
+        A generated completion consists of one or more nonempty reasoning walks
+        separated by restart markers, followed by the end-reasoning marker, the
+        begin-answer marker, a nonempty node-label sequence, the end-answer marker, and
+        the termination symbol. A restart marker must occur between walks, and the
+        termination symbol occurs exactly once at the end.
+    links:
+      - path: src/pure_rl_shortest_path/task.py
+        kind: contractual
+        code_anchor: 019ff0e2-9b56-7d21-8904-a42ca9e3e6e1
+        selector:
+          quote: |-
+            def parse_completion(
+                completion: Sequence[int], vocabulary: Vocabulary
+            ) -> ParsedCompletion:
+                """Parse generated tokens without consulting a graph or judging correctness."""
+
+                tokens = list(completion)
+                if not tokens or tokens[-1] != EOS or EOS in tokens[:-1]:
+                    return _format_failure("completion must end with exactly one EOS")
+                try:
+                    end_reason = tokens.index(END_REASON)
+                except ValueError:
+                    return _format_failure("completion has no END_REASON")
+                reasoning_tokens = tokens[:end_reason]
+                if not reasoning_tokens:
+                    return _format_failure("reasoning segment must be nonempty")
+
+                walks: list[tuple[int, ...]] = []
+                current_walk: list[int] = []
+                for token in reasoning_tokens:
+                    if token == JUMP:
+                        if not current_walk:
+                            return _format_failure("JUMP must follow a nonempty reasoning walk")
+                        walks.append(tuple(current_walk))
+                        current_walk = []
+                        continue
+                    label = vocabulary.token_node(token)
+                    if label is None:
+                        return _format_failure("reasoning segment contains a non-node token")
+                    current_walk.append(label)
+                if not current_walk:
+                    return _format_failure("JUMP must be followed by a node label")
+                walks.append(tuple(current_walk))
+  - id: 019ff0e2-9b56-7522-a611-f7cdc16309a8
+    selector:
+      quote: |-
+        Parsing decodes node tokens using the complete vocabulary and returns the raw
+        reasoning tokens, separated reasoning walks, and answer path. A structural token
+        in a walk or answer, a missing or misplaced delimiter, an empty required
+        segment, or invalid termination produces a format failure. Parsing does not
+        consult the active graph or judge transition legality, endpoint correctness, or
+        optimality.
+    links:
+      - path: src/pure_rl_shortest_path/task.py
+        kind: contractual
+        code_anchor: 019ff0e2-9b56-7a68-88a6-c753f99d0a8b
+        selector:
+          quote: |-
+            def parse_completion(
+                completion: Sequence[int], vocabulary: Vocabulary
+            ) -> ParsedCompletion:
+                """Parse generated tokens without consulting a graph or judging correctness."""
+
+                tokens = list(completion)
+                if not tokens or tokens[-1] != EOS or EOS in tokens[:-1]:
+                    return _format_failure("completion must end with exactly one EOS")
+                try:
+                    end_reason = tokens.index(END_REASON)
+                except ValueError:
+                    return _format_failure("completion has no END_REASON")
+                reasoning_tokens = tokens[:end_reason]
+                if not reasoning_tokens:
+                    return _format_failure("reasoning segment must be nonempty")
+
+                walks: list[tuple[int, ...]] = []
+                current_walk: list[int] = []
+                for token in reasoning_tokens:
+                    if token == JUMP:
+                        if not current_walk:
+                            return _format_failure("JUMP must follow a nonempty reasoning walk")
+                        walks.append(tuple(current_walk))
+                        current_walk = []
+                        continue
+                    label = vocabulary.token_node(token)
+                    if label is None:
+                        return _format_failure("reasoning segment contains a non-node token")
+                    current_walk.append(label)
+                if not current_walk:
+                    return _format_failure("JUMP must be followed by a node label")
+                walks.append(tuple(current_walk))
+
+                suffix = tokens[end_reason + 1 :]
+                if not suffix or suffix[0] != BEGIN_ANSWER:
+                    return _format_failure("END_REASON must be followed by BEGIN_ANSWER")
+                try:
+                    end_answer = suffix.index(END_ANSWER, 1)
+                except ValueError:
+                    return _format_failure("answer segment has no END_ANSWER")
+                if suffix[end_answer + 1 :] != [EOS]:
+                    return _format_failure("END_ANSWER must be followed immediately by EOS")
+                answer_tokens = suffix[1:end_answer]
+                if not answer_tokens:
+                    return _format_failure("answer path must be nonempty")
+                answer: list[int] = []
+                for token in answer_tokens:
+                    label = vocabulary.token_node(token)
+                    if label is None:
+                        return _format_failure("answer segment contains a non-node token")
+                    answer.append(label)
+                return ParsedCompletion(
+                    format_ok=True,
+                    reasoning_tokens=tuple(reasoning_tokens),
+                    reasoning_walks=tuple(walks),
+                    answer=tuple(answer),
+                    format_error=None,
+                )

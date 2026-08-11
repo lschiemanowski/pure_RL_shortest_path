@@ -2,7 +2,7 @@ id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
 description: docs/spec/nodes/l2-completion-protocol.md
 level: L2
 scope: pure-rl-shortest-path/task-environment/completion-protocol
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
 references:
   - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
@@ -17,7 +17,7 @@ anchors:
         sequence of node labels intended to describe a path from the query source to
         its target.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
         kind: informational
   - id: 019febb9-f9e2-7a6a-8375-c4a99c0d8418
     selector:
@@ -27,5 +27,5 @@ anchors:
         whether transitions are legal and whether the answer is correct or shortest
         belong to outcome verification.
     links:
-      - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+      - id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
         kind: informational

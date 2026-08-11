@@ -2,7 +2,7 @@ id: 019feb9e-e54d-76f8-a696-ed88088bfaab
 description: docs/spec/nodes/l1-shortest-path-task-environment.md
 level: L1
 scope: pure-rl-shortest-path/task-environment
-realization: unimplemented
+realization: implemented
 parent: 019feb83-80f6-786a-bf25-d637dd4a6af1
 anchors:
   - id: 019feb9e-e54d-76c8-baa4-43eba9f5616a
