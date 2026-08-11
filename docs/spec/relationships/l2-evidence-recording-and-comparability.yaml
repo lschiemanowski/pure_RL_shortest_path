@@ -1,0 +1,50 @@
+id: 019ff06a-a006-7d37-9c30-0fdce285ab2b
+description: docs/spec/nodes/l2-evidence-recording-and-comparability.md
+level: L2
+scope: pure-rl-shortest-path/experiment-protocol-and-evidence/evidence-recording-and-comparability
+realization: unimplemented
+parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
+references:
+  - id: 019ff06a-a005-793f-92cd-fda20e6db21c
+    kind: contractual
+  - id: 019ff06a-a006-7bb5-9289-6b1bbf153896
+    kind: contractual
+  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    kind: contractual
+anchors:
+  - id: 019ff06a-a006-70a5-b3fb-39c2216e768a
+    selector:
+      quote: |-
+        Each run retains its resolved configuration and provenance, an append-only
+        sequence of training and evaluation metric records, checkpoints, logs, and
+        representative completions. Metric and completion records identify the run,
+        training step, curriculum position, policy checkpoint, problem distribution,
+        and evaluation or training protocol under which they were produced.
+    links:
+      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
+  - id: 019ff06a-a006-7c72-aee9-9e6017cf6c3e
+    selector:
+      quote: |-
+        Learning signals remain auditable in the evidence: verifier reward, each
+        shaping term, auxiliary-objective contribution, and their configured
+        coefficients are recorded separately where applicable. Aggregate metrics retain
+        their denominators, and representative completions preserve enough of the
+        graph, query, generated tokens, parsed result, and verifier facts to explain how
+        the reported outcome was obtained.
+    links:
+      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
+  - id: 019ff06a-a006-7a32-80fb-242c36278a12
+    selector:
+      quote: |-
+        Evidence records expose the task semantics, graph scale, curriculum position,
+        policy architecture, training duration, sampling protocol, reward shaping, and
+        auxiliary objectives needed to judge whether results are comparable. Analysis
+        or reporting that combines runs identifies relevant differences rather than
+        silently pooling incompatible evidence. The training environment records this
+        information but does not itself decide which scientific comparisons are
+        appropriate.
+    links:
+      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
