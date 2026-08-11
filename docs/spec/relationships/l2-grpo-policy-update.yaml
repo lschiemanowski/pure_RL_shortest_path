@@ -2,7 +2,7 @@ id: 019fef85-58fe-7cea-922e-23d922a1f3df
 description: docs/spec/nodes/l2-grpo-policy-update.md
 level: L2
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/grpo-policy-update
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-7a17-a119-2f1461ab60fb
 references:
   - id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
@@ -30,7 +30,7 @@ anchors:
         A group whose rewards have effectively no variation therefore contributes no
         policy advantage.
     links:
-      - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+      - id: 019ff1ac-85fb-77ba-9d70-ff230d27971b
         kind: informational
   - id: 019fef85-58fe-78fe-993a-56c010a65871
     selector:
@@ -57,7 +57,7 @@ anchors:
         Only tokens actually sampled in the completion contribute; they are policy
         actions rather than supervised target tokens.
     links:
-      - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+      - id: 019ff1ac-85fb-77ba-9d70-ff230d27971b
         kind: informational
   - id: 019fef85-58fe-7336-9852-8aa4d1380273
     selector:
@@ -77,5 +77,5 @@ anchors:
         Refreshing the frozen reference is explicit and does not alter the already
         collected rollout batch.
     links:
-      - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+      - id: 019ff1ac-85fb-77ba-9d70-ff230d27971b
         kind: informational

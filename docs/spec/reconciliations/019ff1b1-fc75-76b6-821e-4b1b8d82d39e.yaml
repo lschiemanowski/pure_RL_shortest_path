@@ -1,0 +1,49 @@
+decisions:
+  - abstraction_changed: false
+    node: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+    outcome: revised
+    rationale: The approved reinforcement-learning trainer boundary is unchanged;
+      this slice realizes all three of its rollout, learning-signal, and GRPO
+      descendants.
+  - abstraction_changed: true
+    node: 019fef85-58fe-7288-8a1c-a95e647a1ef0
+    outcome: revised
+    rationale: Clarify that nucleus sampling means top-p truncation and adopt the
+      reviewed training invariant temperature one and top-p one before implementing
+      unconstrained grouped rollout collection.
+  - abstraction_changed: false
+    node: 019fef85-58fe-769d-b675-e1466eae3bff
+    outcome: revised
+    rationale: Implement the approved verifier reward, separately observable coverage
+      shaping, and optional valid-next-token objective without combining their signals.
+  - abstraction_changed: false
+    node: 019fef85-58fe-7cea-922e-23d922a1f3df
+    outcome: revised
+    rationale: Implement literal on-policy GRPO because training samples from the same
+      untransformed policy distribution used to compute likelihood ratios.
+  - abstraction_changed: false
+    node: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
+    outcome: revised
+    rationale: Add the reviewed grouped on-policy collection lowering, its precise
+      rl.py ranges, and regression tests for group order, stopping, and sampling
+      configuration.
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-7e19-9152-5a90b25959de
+    outcome: revised
+    rationale: Add the reviewed reward lowering with exact reward cases, coverage
+      shaping semantics, precise code linkage, and regression tests.
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-7b67-a90a-b3e0fa498cd8
+    outcome: revised
+    rationale: Add the reviewed graph-aware valid-action lowering, including rejection
+      of invalid sampled actions and exclusion of revisited answer nodes.
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-77ba-9d70-ff230d27971b
+    outcome: revised
+    rationale: Add the reviewed GRPO batch and update lowering with completion-only
+      action masks, fixed old and reference scores, global normalization, and
+      microbatch-equivalence tests.
+direction: spec-led
+id: 019ff1b1-fc75-76b6-821e-4b1b8d82d39e
+rationale: Implement the reviewed reinforcement-learning slice in one cohesive module
+  while making the on-policy sampling invariant explicit.

@@ -1,0 +1,333 @@
+id: 019ff1ac-85fb-77ba-9d70-ff230d27971b
+description: docs/spec/nodes/l3-grpo-batch-construction-and-update.md
+level: L3
+scope: pure-rl-shortest-path/reinforcement-learning-trainer/grpo-policy-update/grpo-batch-construction-and-update
+realization: implemented
+parent: 019fef85-58fe-7cea-922e-23d922a1f3df
+references:
+  - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
+    kind: contractual
+  - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
+    kind: contractual
+  - id: 019ff1ac-85fb-7b67-a90a-b3e0fa498cd8
+    kind: contractual
+  - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
+    kind: contractual
+covers:
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        def pack_rollouts(
+            rollouts: Sequence[Rollout],
+            vocabulary: Vocabulary,
+            *,
+            device: torch.device,
+        ) -> PackedRollouts:
+            """Pack prompts and sampled actions without creating target completions."""
+
+            if not rollouts:
+                raise ValueError("at least one rollout is required")
+            maximum = max(
+                len(rollout.example.prompt) + len(rollout.completion)
+                for rollout in rollouts
+            )
+            input_ids = torch.full((len(rollouts), maximum - 1), PAD, dtype=torch.long)
+            labels = torch.full_like(input_ids, PAD)
+            attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+            action_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+            valid_next_mask = torch.zeros(
+                (len(rollouts), maximum - 1, vocabulary.size), dtype=torch.bool
+            )
+
+            for row, rollout in enumerate(rollouts):
+                sequence = (*rollout.example.prompt, *rollout.completion)
+                length = len(sequence)
+                input_ids[row, : length - 1] = torch.tensor(sequence[:-1])
+                labels[row, : length - 1] = torch.tensor(sequence[1:])
+                attention_mask[row, : length - 1] = True
+                first_action = len(rollout.example.prompt) - 1
+                action_mask[row, first_action : length - 1] = True
+                valid_sets = valid_next_token_sets(
+                    rollout.example, rollout.completion, vocabulary
+                )
+                for completion_index, valid in enumerate(valid_sets):
+                    if valid:
+                        position = first_action + completion_index
+                        valid_next_mask[row, position, list(valid)] = True
+
+            return PackedRollouts(
+                input_ids.to(device),
+                attention_mask.to(device),
+                labels.to(device),
+                action_mask.to(device),
+                valid_next_mask.to(device),
+                torch.tensor(
+                    [rollout.reward.total_reward for rollout in rollouts],
+                    dtype=torch.float32,
+                    device=device,
+                ),
+                torch.tensor(
+                    [rollout.group_id for rollout in rollouts],
+                    dtype=torch.long,
+                    device=device,
+                ),
+            )
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        def group_relative_advantages(
+            rewards: torch.Tensor,
+            group_ids: torch.Tensor,
+            group_size: int,
+            epsilon: float = 1e-6,
+        ) -> tuple[torch.Tensor, float]:
+            """Normalize rewards within adjacent fixed-size comparison groups."""
+
+            if rewards.ndim != 1 or group_ids.shape != rewards.shape:
+                raise ValueError("rewards and group_ids must be equally sized vectors")
+            group_size = _positive_int(group_size, "group_size")
+            epsilon = _nonnegative_real(epsilon, "epsilon")
+            if epsilon == 0.0:
+                raise ValueError("epsilon must be positive")
+            if rewards.numel() == 0 or rewards.numel() % group_size:
+                raise ValueError("rollout count must be a positive multiple of group_size")
+
+            advantages = torch.zeros_like(rewards, dtype=torch.float32)
+            seen: set[int] = set()
+            zero_variance_groups = 0
+            for start in range(0, rewards.numel(), group_size):
+                group = group_ids[start : start + group_size]
+                group_id = int(group[0].item())
+                if not bool(group.eq(group_id).all()) or group_id in seen:
+                    raise ValueError("comparison groups must be adjacent and uniquely identified")
+                seen.add(group_id)
+                values = rewards[start : start + group_size].float()
+                standard_deviation = values.std(unbiased=False)
+                if float(standard_deviation.item()) <= epsilon:
+                    zero_variance_groups += 1
+                else:
+                    advantages[start : start + group_size] = (
+                        values - values.mean()
+                    ) / (standard_deviation + epsilon)
+            return advantages, zero_variance_groups / len(seen)
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        def grpo_update(
+            model: Transformer,
+            reference: Transformer,
+            optimizer: torch.optim.Optimizer,
+            packed: PackedRollouts,
+            config: GRPOConfig,
+            *,
+            autocast_dtype: torch.dtype | None = None,
+        ) -> UpdateMetrics:
+            """Update the current policy from its fixed grouped rollout batch."""
+
+            if packed.input_ids.shape[0] == 0:
+                raise ValueError("packed rollout batch must be nonempty")
+            model.eval()
+            reference.eval()
+            old_log_probabilities = _score_sampled_actions(
+                model, packed, config.microbatch_size, autocast_dtype
+            )
+            reference_log_probabilities = _score_sampled_actions(
+                reference, packed, config.microbatch_size, autocast_dtype
+            )
+            advantages, zero_variance_fraction = group_relative_advantages(
+                packed.rewards,
+                packed.group_ids,
+                config.group_size,
+                config.advantage_epsilon,
+            )
+            batch_size = packed.input_ids.shape[0]
+            valid_position_count = int(packed.valid_next_mask.any(dim=-1).sum().item())
+            amp_enabled = autocast_dtype is not None
+            totals = {
+                "policy_loss": 0.0,
+                "sampled_kl": 0.0,
+                "valid_loss": 0.0,
+                "valid_mass": 0.0,
+                "gradient_norm": 0.0,
+            }
+
+            model.train()
+            for _ in range(config.update_epochs):
+                optimizer.zero_grad(set_to_none=True)
+                epoch = {key: 0.0 for key in totals if key != "gradient_norm"}
+                for start in range(0, batch_size, config.microbatch_size):
+                    end = min(start + config.microbatch_size, batch_size)
+                    chunk = packed.slice(start, end)
+                    with torch.autocast(
+                        device_type=packed.input_ids.device.type,
+                        dtype=autocast_dtype,
+                        enabled=amp_enabled,
+                    ):
+                        logits = model(
+                            chunk.input_ids, attention_mask=chunk.attention_mask
+                        ).logits
+                        current_log_probabilities = _gathered_log_probabilities(
+                            logits, chunk.labels
+                        )
+                        token_counts = chunk.action_mask.sum(dim=1).clamp_min(1)
+
+                        log_ratio = (
+                            current_log_probabilities - old_log_probabilities[start:end]
+                        )
+                        ratio = log_ratio.exp()
+                        clipped_ratio = ratio.clamp(
+                            1.0 - config.clip_epsilon, 1.0 + config.clip_epsilon
+                        )
+                        advantage = advantages[start:end, None]
+                        token_objective = torch.minimum(
+                            ratio * advantage, clipped_ratio * advantage
+                        )
+                        sequence_objective = (
+                            (token_objective * chunk.action_mask).sum(dim=1) / token_counts
+                        )
+                        policy_loss = -sequence_objective.sum() / batch_size
+
+                        reference_delta = (
+                            reference_log_probabilities[start:end]
+                            - current_log_probabilities
+                        )
+                        sampled_kl_tokens = (
+                            reference_delta.exp() - reference_delta - 1.0
+                        )
+                        sampled_kl = (
+                            (
+                                (sampled_kl_tokens * chunk.action_mask).sum(dim=1)
+                                / token_counts
+                            ).sum()
+                            / batch_size
+                        )
+
+                        valid_positions = chunk.valid_next_mask.any(dim=-1)
+                        if bool(valid_positions.any()):
+                            float_logits = logits.float()
+                            valid_logits = float_logits.masked_fill(
+                                ~chunk.valid_next_mask, -torch.inf
+                            )
+                            log_valid_mass = valid_logits.logsumexp(
+                                dim=-1
+                            ) - float_logits.logsumexp(dim=-1)
+                            denominator = max(valid_position_count, 1)
+                            valid_loss = -log_valid_mass[valid_positions].sum() / denominator
+                            valid_mass = log_valid_mass[valid_positions].exp().sum() / denominator
+                        else:
+                            valid_loss = logits.sum() * 0.0
+                            valid_mass = logits.sum() * 0.0
+
+                        loss = (
+                            policy_loss
+                            + config.kl_coefficient * sampled_kl
+                            + config.valid_coefficient * valid_loss
+                        )
+                    loss.backward()
+                    epoch["policy_loss"] += float(policy_loss.detach().item())
+                    epoch["sampled_kl"] += float(sampled_kl.detach().item())
+                    epoch["valid_loss"] += float(valid_loss.detach().item())
+                    epoch["valid_mass"] += float(valid_mass.detach().item())
+
+                gradient_norm = nn.utils.clip_grad_norm_(
+                    model.parameters(), config.gradient_clip
+                )
+                optimizer.step()
+                for key, value in epoch.items():
+                    totals[key] += value
+                totals["gradient_norm"] += float(gradient_norm.item())
+
+            scale = 1.0 / config.update_epochs
+            policy_loss = totals["policy_loss"] * scale
+            sampled_kl = totals["sampled_kl"] * scale
+            valid_loss = totals["valid_loss"] * scale
+            return UpdateMetrics(
+                policy_loss=policy_loss,
+                sampled_kl=sampled_kl,
+                valid_loss=valid_loss,
+                valid_mass=totals["valid_mass"] * scale,
+                total_loss=(
+                    policy_loss
+                    + config.kl_coefficient * sampled_kl
+                    + config.valid_coefficient * valid_loss
+                ),
+                zero_variance_group_fraction=zero_variance_fraction,
+                gradient_norm=totals["gradient_norm"] * scale,
+            )
+anchors:
+  - id: 019ff1ac-85fb-799b-acf6-d07c7b2b463e
+    selector:
+      quote: |-
+        Batch construction concatenates each prompt with the completion actually
+        sampled from it. Next-token labels are the shifted concatenated sequence, but
+        the action mask selects only completion positions; prompt tokens therefore
+        provide context and never act as supervised targets. The packed batch retains
+        rollout rewards, adjacent group identities, and the valid-action sets computed
+        for the same sampled positions.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff1ac-85fb-7ab1-98de-03e3981094fa
+        selector:
+          quote: |2-
+                    first_action = len(rollout.example.prompt) - 1
+                    action_mask[row, first_action : length - 1] = True
+  - id: 019ff1ac-85fb-72db-87b0-445d966d70bd
+    selector:
+      quote: |-
+        Before any optimizer step, the current policy and frozen reference policy score
+        every sampled action. These old-policy and reference log probabilities remain
+        fixed for every update epoch. Rewards are normalized within each fixed-size
+        comparison group using the population standard deviation; a group with standard
+        deviation at or below the declared epsilon receives zero advantages.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff1ac-85fb-75c6-8d4f-642608efd0dc
+        selector:
+          quote: |2-
+                old_log_probabilities = _score_sampled_actions(
+                    model, packed, config.microbatch_size, autocast_dtype
+                )
+                reference_log_probabilities = _score_sampled_actions(
+                    reference, packed, config.microbatch_size, autocast_dtype
+                )
+  - id: 019ff1b1-fc75-78c8-81cd-eae90ecd9c5f
+    selector:
+      quote: |-
+        At each sampled token, GRPO uses the clipped likelihood-ratio objective. Policy
+        and sampled-token KL terms are first averaged over the actions in each
+        completion and then equally over completions. For
+        \(\Delta=\log\pi_{\mathrm{ref}}-\log\pi_\theta\), the nonnegative sampled KL
+        estimator is
+
+        \[
+        e^\Delta-\Delta-1.
+        \]
+
+        The valid-next-token loss is averaged globally over positions having a nonempty
+        valid set. The complete loss is
+
+        \[
+        L=L_{\mathrm{policy}}+\beta_{\mathrm{KL}}L_{\mathrm{KL}}
+          +\beta_{\mathrm{valid}}L_{\mathrm{valid}}.
+        \]
+    links:
+      - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+        kind: informational
+  - id: 019ff1ac-85fb-70a9-ada9-26b96f73be5c
+    selector:
+      quote: |-
+        Microbatches preserve these global normalizations. Their gradients accumulate
+        over the whole rollout batch, followed by one global gradient clipping operation
+        and one optimizer step per update epoch. Only the current policy is updated.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff1ac-85fb-7ec1-91d2-8c56e2278b28
+        selector:
+          quote: |2-
+                    gradient_norm = nn.utils.clip_grad_norm_(
+                        model.parameters(), config.gradient_clip
+                    )
+                    optimizer.step()

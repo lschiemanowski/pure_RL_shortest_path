@@ -1,0 +1,82 @@
+id: 019ff1ac-85fb-7e19-9152-5a90b25959de
+description: docs/spec/nodes/l3-verifier-reward-and-coverage-shaping.md
+level: L3
+scope: pure-rl-shortest-path/reinforcement-learning-trainer/reward-computation-and-auxiliary-objective/verifier-reward-and-coverage-shaping
+realization: implemented
+parent: 019fef85-58fe-769d-b675-e1466eae3bff
+references:
+  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    kind: contractual
+covers:
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        def reward_from_outcome(
+            outcome: OutcomeFacts, coverage_coefficient: float = 0.0
+        ) -> RewardComponents:
+            """Convert verifier facts into explicit base, shaping, and total rewards."""
+
+            coefficient = _nonnegative_real(coverage_coefficient, "coverage_coefficient")
+            if not outcome.format_ok:
+                base_reward = 0.0
+            elif not outcome.valid_path:
+                base_reward = 0.05
+            elif outcome.shortest:
+                base_reward = 1.0
+            else:
+                assert outcome.answer_length is not None and outcome.answer_length > 0
+                base_reward = 0.5 * outcome.shortest_distance / outcome.answer_length
+            coverage = (
+                outcome.reasoning.answer_edge_coverage
+                if outcome.valid_path and outcome.reasoning is not None
+                else 0.0
+            )
+            total = base_reward + coefficient * coverage
+            return RewardComponents(base_reward, coverage, coefficient, total)
+anchors:
+  - id: 019ff1ac-85fb-7d8c-afe9-e1a3b63e938b
+    selector:
+      quote: |-
+        Reward computation consumes deterministic outcome-verifier facts. It assigns
+        base reward zero to a malformed completion, \(0.05\) to a well-formed completion
+        without a valid answer path, one to a shortest answer path, and
+        \(0.5d^*/\ell\) to a valid non-shortest path of length \(\ell\), where \(d^*\)
+        is the independently computed shortest distance.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff1ac-85fb-733e-90d1-4acf4d4887d6
+        selector:
+          quote: |2-
+                if not outcome.format_ok:
+                    base_reward = 0.0
+                elif not outcome.valid_path:
+                    base_reward = 0.05
+                elif outcome.shortest:
+                    base_reward = 1.0
+                else:
+                    assert outcome.answer_length is not None and outcome.answer_length > 0
+                    base_reward = 0.5 * outcome.shortest_distance / outcome.answer_length
+  - id: 019ff1ac-85fb-7e81-8f9a-43330910cb5a
+    selector:
+      quote: |-
+        For a valid answer only, reasoning coverage \(c\) is the fraction of distinct
+        answer edges that also occur among legally traversed reasoning edges. Malformed
+        and invalid answers receive coverage zero. The total reward is
+
+        \[
+        r = r_{\mathrm{base}} + \lambda_{\mathrm{coverage}}c.
+        \]
+
+        The nonnegative shaping coefficient is configured independently and may be
+        zero. Every rollout records the base reward, coverage, coefficient, and total
+        reward separately, so verifier-reward-only and shaped experiments remain
+        distinguishable.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff1ac-85fb-78da-9af2-7f414619cdd9
+        selector:
+          quote: |2-
+                total = base_reward + coefficient * coverage
+                return RewardComponents(base_reward, coverage, coefficient, total)

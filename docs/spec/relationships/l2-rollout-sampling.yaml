@@ -2,7 +2,7 @@ id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
 description: docs/spec/nodes/l2-rollout-sampling.md
 level: L2
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/rollout-sampling
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-7a17-a119-2f1461ab60fb
 references:
   - id: 019fec29-efaa-756e-a1a3-12c4676ea60a
@@ -18,10 +18,14 @@ anchors:
         Rollout sampling receives training problems supplied by the experiment protocol
         and produces a declared number of policy completions for each problem.
         Completions for the same problem form a comparison group. Sampling uses declared
-        temperature, nucleus threshold, and maximum completion length, and terminates
-        when the policy emits the termination symbol or reaches the length limit.
+        maximum completion length and terminates when the policy emits the termination
+        symbol or reaches that limit. Training fixes temperature and top-p to one, so
+        each token is drawn from the policy's complete softmax distribution. Top-p is
+        also called nucleus sampling: values below one would retain only the smallest
+        high-probability token set reaching that cumulative probability, but training
+        does not apply this truncation.
     links:
-      - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+      - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
         kind: informational
   - id: 019fef85-58fe-77eb-8ad2-11f58238f09a
     selector:
@@ -32,5 +36,5 @@ anchors:
         influence token selection within that rollout. Batching and cached evaluation
         may improve execution efficiency but do not change the sampling semantics.
     links:
-      - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+      - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
         kind: informational
