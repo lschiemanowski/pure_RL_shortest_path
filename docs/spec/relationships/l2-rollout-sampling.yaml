@@ -1,0 +1,36 @@
+id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
+description: docs/spec/nodes/l2-rollout-sampling.md
+level: L2
+scope: pure-rl-shortest-path/reinforcement-learning-trainer/rollout-sampling
+realization: unimplemented
+parent: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+references:
+  - id: 019fec29-efaa-756e-a1a3-12c4676ea60a
+    kind: contractual
+  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+    kind: contractual
+  - id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
+    kind: contractual
+anchors:
+  - id: 019fef85-58fe-7123-a5d4-b337132f0181
+    selector:
+      quote: |-
+        Rollout sampling receives training problems supplied by the experiment protocol
+        and produces a declared number of policy completions for each problem.
+        Completions for the same problem form a comparison group. Sampling uses declared
+        temperature, nucleus threshold, and maximum completion length, and terminates
+        when the policy emits the termination symbol or reaches the length limit.
+    links:
+      - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+        kind: informational
+  - id: 019fef85-58fe-77eb-8ad2-11f58238f09a
+    selector:
+      quote: |-
+        Token selection operates on the policy's complete next-token scores without
+        task-specific legality masks, forced tokens, or post-hoc edits. Graph
+        verification occurs only after a completion has been sampled and cannot
+        influence token selection within that rollout. Batching and cached evaluation
+        may improve execution efficiency but do not change the sampling semantics.
+    links:
+      - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+        kind: informational

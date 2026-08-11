@@ -1,0 +1,38 @@
+id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+description: docs/spec/nodes/l2-curriculum-protocol.md
+level: L2
+scope: pure-rl-shortest-path/experiment-protocol-and-evidence/curriculum-protocol
+realization: unimplemented
+parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
+references:
+  - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
+    kind: contractual
+  - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+    kind: contractual
+anchors:
+  - id: 019fef85-58fe-70e1-8523-b7225c1de61b
+    selector:
+      quote: |-
+        The curriculum protocol defines an ordered sequence of graph-problem
+        configurations. At each training step it selects the active stage and any
+        declared mixture of problems from the following stage, then supplies those
+        problems to the reinforcement-learning trainer. The trainer does not choose or
+        alter this distribution.
+    links:
+      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
+  - id: 019fef85-58fe-744b-8d47-283a8c5c01bd
+    selector:
+      quote: |-
+        The protocol evaluates the current policy on independently generated validation
+        problems. Once shortest-path performance reaches a configured interpolation
+        threshold, it may gradually increase the fraction of next-stage training
+        problems up to a declared maximum. It advances fully to the next stage only
+        after the mixture is ready and the configured validation threshold has been met
+        for the required number of consecutive validations. Training and validation use
+        separate random streams, and validation examples never become training
+        rollouts. Each transition records the completed stage and new curriculum
+        position.
+    links:
+      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
