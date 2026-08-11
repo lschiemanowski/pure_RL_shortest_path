@@ -2,7 +2,7 @@ id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
 description: docs/spec/nodes/l1-transformer-policy.md
 level: L1
 scope: pure-rl-shortest-path/transformer-policy
-realization: unimplemented
+realization: implemented
 parent: 019feb83-80f6-786a-bf25-d637dd4a6af1
 anchors:
   - id: 019feb9e-e54d-7694-9f5e-9551f8a9ca15

@@ -2,7 +2,7 @@ id: 019fec29-efaa-756e-a1a3-12c4676ea60a
 description: docs/spec/nodes/l2-token-prefix-scoring-interface.md
 level: L2
 scope: pure-rl-shortest-path/transformer-policy/token-prefix-scoring-interface
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
 references:
   - id: 019fec29-efaa-7969-8feb-594a61b8874d
@@ -19,7 +19,7 @@ anchors:
         when requested, the updated attention state. It rejects an effective prefix
         longer than the model's configured context limit.
     links:
-      - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+      - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
         kind: informational
   - id: 019fec29-efaa-78dd-8b9c-5c9f38e964bf
     selector:
@@ -30,5 +30,5 @@ anchors:
         token selection, score masking or forcing, and stopping decisions. It does not
         parse completions, consult graph verification, or access shortest-path answers.
     links:
-      - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+      - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
         kind: informational

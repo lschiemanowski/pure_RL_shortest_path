@@ -1,0 +1,243 @@
+id: 019ff180-b61e-7c0a-b65b-28fe5c15b11f
+description: docs/spec/nodes/l3-decoder-only-transformer-construction.md
+level: L3
+scope: pure-rl-shortest-path/transformer-policy/transformer-model/decoder-only-transformer-construction
+realization: implemented
+parent: 019fec29-efaa-7969-8feb-594a61b8874d
+covers:
+  - path: src/pure_rl_shortest_path/model.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class TransformerConfig:
+            vocab_size: int
+            max_context_length: int = 768
+            d_model: int = 256
+            n_layers: int = 6
+            n_heads: int = 8
+            mlp_dim: int = 768
+            rope_base: float = 10_000.0
+            norm_eps: float = 1e-5
+
+            def __post_init__(self) -> None:
+                vocab_size = _positive_int(self.vocab_size, "vocab_size")
+                context = _positive_int(self.max_context_length, "max_context_length")
+                model_width = _positive_int(self.d_model, "d_model")
+                layers = _positive_int(self.n_layers, "n_layers")
+                heads = _positive_int(self.n_heads, "n_heads")
+                mlp_width = _positive_int(self.mlp_dim, "mlp_dim")
+                rope_base = _positive_real(self.rope_base, "rope_base")
+                norm_eps = _positive_real(self.norm_eps, "norm_eps")
+                if model_width % heads:
+                    raise ValueError("d_model must be divisible by n_heads")
+                if (model_width // heads) % 2:
+                    raise ValueError("attention head dimension must be even for rotary positions")
+                object.__setattr__(self, "vocab_size", vocab_size)
+                object.__setattr__(self, "max_context_length", context)
+                object.__setattr__(self, "d_model", model_width)
+                object.__setattr__(self, "n_layers", layers)
+                object.__setattr__(self, "n_heads", heads)
+                object.__setattr__(self, "mlp_dim", mlp_width)
+                object.__setattr__(self, "rope_base", rope_base)
+                object.__setattr__(self, "norm_eps", norm_eps)
+  - path: src/pure_rl_shortest_path/model.py
+    selector:
+      quote: |-
+        class RMSNorm(nn.Module):
+            def __init__(self, dimension: int, eps: float) -> None:
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(dimension))
+                self.eps = eps
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                scale = x.float().pow(2).mean(dim=-1, keepdim=True).add(self.eps).rsqrt()
+                return (x.float() * scale).to(x.dtype) * self.weight
+
+
+        class RotaryEmbedding(nn.Module):
+            def __init__(self, head_dim: int, context: int, base: float) -> None:
+                super().__init__()
+                inverse_frequency = 1.0 / (
+                    base ** (torch.arange(0, head_dim, 2).float() / head_dim)
+                )
+                positions = torch.arange(context).float()
+                frequencies = torch.outer(positions, inverse_frequency)
+                self.register_buffer("cos", frequencies.cos(), persistent=False)
+                self.register_buffer("sin", frequencies.sin(), persistent=False)
+
+            def rotate(self, x: torch.Tensor, start_position: int) -> torch.Tensor:
+                length = x.shape[-2]
+                stop_position = start_position + length
+                if stop_position > self.cos.shape[0]:
+                    raise ValueError("rotary position exceeds configured context")
+                cos = self.cos[start_position:stop_position].to(x.dtype)[None, None]
+                sin = self.sin[start_position:stop_position].to(x.dtype)[None, None]
+                even = x[..., 0::2]
+                odd = x[..., 1::2]
+                rotated = torch.stack(
+                    (even * cos - odd * sin, even * sin + odd * cos), dim=-1
+                )
+                return rotated.flatten(-2)
+  - path: src/pure_rl_shortest_path/model.py
+    selector:
+      quote: |2-
+            def __init__(self, config: TransformerConfig) -> None:
+                super().__init__()
+                self.heads = config.n_heads
+                self.head_dim = config.d_model // config.n_heads
+                self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
+                self.output = nn.Linear(config.d_model, config.d_model, bias=False)
+                self.rope = RotaryEmbedding(
+                    self.head_dim, config.max_context_length, config.rope_base
+                )
+  - path: src/pure_rl_shortest_path/model.py
+    selector:
+      quote: |2-
+            def __init__(self, config: TransformerConfig) -> None:
+                super().__init__()
+                self.attention_norm = RMSNorm(config.d_model, config.norm_eps)
+                self.attention = CausalSelfAttention(config)
+                self.mlp_norm = RMSNorm(config.d_model, config.norm_eps)
+                self.gate = nn.Linear(config.d_model, config.mlp_dim, bias=False)
+                self.up = nn.Linear(config.d_model, config.mlp_dim, bias=False)
+                self.down = nn.Linear(config.mlp_dim, config.d_model, bias=False)
+  - path: src/pure_rl_shortest_path/model.py
+    selector:
+      quote: |2-
+            def __init__(self, config: TransformerConfig) -> None:
+                super().__init__()
+                self.config = config
+                self.embedding = nn.Embedding(config.vocab_size, config.d_model)
+                self.blocks = nn.ModuleList(
+                    TransformerBlock(config) for _ in range(config.n_layers)
+                )
+                self.final_norm = RMSNorm(config.d_model, config.norm_eps)
+                self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+                self.apply(self._initialize)
+                self.lm_head.weight = self.embedding.weight
+
+            @staticmethod
+            def _initialize(module: nn.Module) -> None:
+                if isinstance(module, (nn.Linear, nn.Embedding)):
+                    nn.init.normal_(module.weight, mean=0.0, std=0.02)
+anchors:
+  - id: 019ff180-b61f-73ca-9e55-e6b45cbf06a4
+    selector:
+      quote: |-
+        The transformer configuration declares positive vocabulary, context, model,
+        layer, attention-head, and feed-forward dimensions together with positive
+        rotary-position and normalization constants. Model width is divisible by the
+        head count, and each attention-head dimension is even so rotary positions are
+        well-defined. Construction rejects a configuration that violates these
+        relationships.
+    links:
+      - path: src/pure_rl_shortest_path/model.py
+        kind: contractual
+        code_anchor: 019ff180-b61f-7350-8aba-938330524e42
+        selector:
+          quote: |-
+            @dataclass(frozen=True)
+            class TransformerConfig:
+                vocab_size: int
+                max_context_length: int = 768
+                d_model: int = 256
+                n_layers: int = 6
+                n_heads: int = 8
+                mlp_dim: int = 768
+                rope_base: float = 10_000.0
+                norm_eps: float = 1e-5
+
+                def __post_init__(self) -> None:
+                    vocab_size = _positive_int(self.vocab_size, "vocab_size")
+                    context = _positive_int(self.max_context_length, "max_context_length")
+                    model_width = _positive_int(self.d_model, "d_model")
+                    layers = _positive_int(self.n_layers, "n_layers")
+                    heads = _positive_int(self.n_heads, "n_heads")
+                    mlp_width = _positive_int(self.mlp_dim, "mlp_dim")
+                    rope_base = _positive_real(self.rope_base, "rope_base")
+                    norm_eps = _positive_real(self.norm_eps, "norm_eps")
+                    if model_width % heads:
+                        raise ValueError("d_model must be divisible by n_heads")
+                    if (model_width // heads) % 2:
+                        raise ValueError("attention head dimension must be even for rotary positions")
+                    object.__setattr__(self, "vocab_size", vocab_size)
+                    object.__setattr__(self, "max_context_length", context)
+                    object.__setattr__(self, "d_model", model_width)
+                    object.__setattr__(self, "n_layers", layers)
+                    object.__setattr__(self, "n_heads", heads)
+                    object.__setattr__(self, "mlp_dim", mlp_width)
+                    object.__setattr__(self, "rope_base", rope_base)
+                    object.__setattr__(self, "norm_eps", norm_eps)
+  - id: 019ff180-b61f-7e52-94d5-1cb458cfeb48
+    selector:
+      quote: |-
+        The model uses token embeddings, pre-normalized causal self-attention with
+        rotary positions, gated SiLU feed-forward blocks, a final RMS normalization,
+        and a full-vocabulary linear output whose weights are tied to the token
+        embeddings. Linear and embedding matrices are sampled from a zero-mean normal
+        distribution with standard deviation 0.02, while RMS normalization scales begin
+        at one. Construction accepts no checkpoint or pretrained parameter source.
+    links:
+      - path: src/pure_rl_shortest_path/model.py
+        kind: contractual
+        code_anchor: 019ff180-b61f-72c4-a9e4-d965c0c9e089
+        selector:
+          quote: |2-
+                def __init__(self, config: TransformerConfig) -> None:
+                    super().__init__()
+                    self.config = config
+                    self.embedding = nn.Embedding(config.vocab_size, config.d_model)
+                    self.blocks = nn.ModuleList(
+                        TransformerBlock(config) for _ in range(config.n_layers)
+                    )
+                    self.final_norm = RMSNorm(config.d_model, config.norm_eps)
+                    self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+                    self.apply(self._initialize)
+                    self.lm_head.weight = self.embedding.weight
+
+                @staticmethod
+                def _initialize(module: nn.Module) -> None:
+                    if isinstance(module, (nn.Linear, nn.Embedding)):
+                        nn.init.normal_(module.weight, mean=0.0, std=0.02)
+      - path: src/pure_rl_shortest_path/model.py
+        kind: contractual
+        code_anchor: 019ff180-b61f-7d57-9adc-8be9edb0c54a
+        selector:
+          quote: |2-
+                def __init__(self, config: TransformerConfig) -> None:
+                    super().__init__()
+                    self.attention_norm = RMSNorm(config.d_model, config.norm_eps)
+                    self.attention = CausalSelfAttention(config)
+                    self.mlp_norm = RMSNorm(config.d_model, config.norm_eps)
+                    self.gate = nn.Linear(config.d_model, config.mlp_dim, bias=False)
+                    self.up = nn.Linear(config.d_model, config.mlp_dim, bias=False)
+                    self.down = nn.Linear(config.mlp_dim, config.d_model, bias=False)
+  - id: 019ff180-b61f-7dc1-a57a-616a73fd5f45
+    selector:
+      quote: |-
+        Given the same configuration and Torch random-generator state, construction
+        produces identical learned parameters. The immutable configuration and model
+        state dictionary provide the architecture and parameter identity needed by
+        checkpoint and experiment records.
+    links:
+      - path: src/pure_rl_shortest_path/model.py
+        kind: contractual
+        code_anchor: 019ff180-b61f-7943-be82-240fb703d387
+        selector:
+          quote: |2-
+                def __init__(self, config: TransformerConfig) -> None:
+                    super().__init__()
+                    self.config = config
+                    self.embedding = nn.Embedding(config.vocab_size, config.d_model)
+                    self.blocks = nn.ModuleList(
+                        TransformerBlock(config) for _ in range(config.n_layers)
+                    )
+                    self.final_norm = RMSNorm(config.d_model, config.norm_eps)
+                    self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+                    self.apply(self._initialize)
+                    self.lm_head.weight = self.embedding.weight
+
+                @staticmethod
+                def _initialize(module: nn.Module) -> None:
+                    if isinstance(module, (nn.Linear, nn.Embedding)):
+                        nn.init.normal_(module.weight, mean=0.0, std=0.02)
