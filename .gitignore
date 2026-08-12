@@ -206,6 +206,10 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Local experiment and generated Stratic state
+runs/
+.stratic/
+
 # PyPI configuration file
 .pypirc
 

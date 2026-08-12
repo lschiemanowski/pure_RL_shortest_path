@@ -1,0 +1,240 @@
+id: 019ff54c-87f7-704a-b05e-fb972cc40380
+description: docs/spec/nodes/l3-toml-experiment-declaration-and-resolution.md
+level: L3
+scope: pure-rl-shortest-path/experiment-protocol-and-evidence/run-configuration-and-provenance/toml-experiment-declaration-and-resolution
+realization: implemented
+parent: 019ff06a-a005-793f-92cd-fda20e6db21c
+references:
+  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+    kind: contractual
+  - id: 019fec29-efaa-7969-8feb-594a61b8874d
+    kind: contractual
+  - id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
+    kind: contractual
+  - id: 019fef85-58fe-769d-b675-e1466eae3bff
+    kind: contractual
+  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+    kind: contractual
+  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+    kind: contractual
+  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    kind: contractual
+covers:
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class RunConfiguration:
+            """All scientific and operational settings after TOML resolution."""
+
+            schema_version: int
+            name: str
+            master_seed: int
+            vocabulary: Vocabulary
+            model: TransformerConfig
+            rollout: RolloutSamplingConfig
+            reward: RewardConfig
+            optimizer: OptimizerConfig
+            grpo: GRPOConfig
+            curriculum: CurriculumConfig
+            training: TrainingScheduleConfig
+            evaluation: EvaluationScheduleConfig
+            artifacts: ArtifactConfig
+            runtime: RuntimeConfig
+
+            def __post_init__(self) -> None:
+                version = _plain_int(self.schema_version, "schema_version")
+                if version != CONFIG_SCHEMA_VERSION:
+                    raise ConfigurationError(
+                        f"unsupported schema_version {version}; expected "
+                        f"{CONFIG_SCHEMA_VERSION}"
+                    )
+                name = _nonempty_string(self.name, "name")
+                seed = _plain_int(self.master_seed, "seed")
+                if not 0 <= seed < 2**63:
+                    raise ConfigurationError("seed must lie in [0, 2^63)")
+                largest_graph = max(stage.vertices for stage in self.curriculum.stages)
+                if self.vocabulary.node_label_count < largest_graph:
+                    raise ConfigurationError(
+                        "task.node_label_count must cover every curriculum stage"
+                    )
+                if self.model.vocab_size != self.vocabulary.size:
+                    raise ConfigurationError(
+                        "model vocabulary size must be derived from the task vocabulary"
+                    )
+                if self.grpo.group_size != self.rollout.group_size:
+                    raise ConfigurationError(
+                        "GRPO group size must equal the rollout comparison-group size"
+                    )
+                maximum_prompt = max(2 * stage.edges + 7 for stage in self.curriculum.stages)
+                required_context = maximum_prompt + max(
+                    self.rollout.max_new_tokens,
+                    self.evaluation.sampling.max_new_tokens,
+                )
+                if required_context > self.model.max_context_length:
+                    raise ConfigurationError(
+                        "model.max_context_length is smaller than the largest configured "
+                        "prompt plus completion budget"
+                    )
+                object.__setattr__(self, "schema_version", version)
+                object.__setattr__(self, "name", name)
+                object.__setattr__(self, "master_seed", seed)
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def resolve_run_configuration(
+            declaration: Mapping[str, Any], *, declaration_directory: Path
+        ) -> RunConfiguration:
+            """Resolve a parsed TOML declaration into the project's typed contracts."""
+
+            _reject_unknown(
+                declaration,
+                {
+                    "schema_version",
+                    "name",
+                    "seed",
+                    "task",
+                    "model",
+                    "rollout",
+                    "reward",
+                    "optimization",
+                    "curriculum",
+                    "training",
+                    "evaluation",
+                    "artifacts",
+                    "runtime",
+                },
+                "root",
+            )
+            for key in ("schema_version", "name", "seed"):
+                if key not in declaration:
+                    raise ConfigurationError(f"missing required key: {key}")
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |2-
+            return RunConfiguration(
+                schema_version=declaration["schema_version"],
+                name=declaration["name"],
+                master_seed=declaration["seed"],
+                vocabulary=vocabulary,
+                model=model,
+                rollout=rollout,
+                reward=reward,
+                optimizer=optimizer,
+                grpo=grpo,
+                curriculum=curriculum,
+                training=training,
+                evaluation=evaluation,
+                artifacts=artifacts,
+                runtime=runtime,
+            )
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def load_run_configuration(path: str | Path) -> LoadedRunConfiguration:
+            """Read one TOML declaration and retain both source and resolved identities."""
+
+            source_path = Path(path).expanduser().resolve()
+            source_bytes = source_path.read_bytes()
+            try:
+                declaration = tomllib.loads(source_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+                raise ConfigurationError(f"invalid TOML configuration: {error}") from error
+            resolved = resolve_run_configuration(
+                declaration, declaration_directory=source_path.parent
+            )
+            resolved_bytes = _canonical_json_bytes(resolved_configuration_record(resolved))
+            return LoadedRunConfiguration(
+                source_path=source_path,
+                source_bytes=source_bytes,
+                resolved=resolved,
+                source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+                resolved_sha256=hashlib.sha256(resolved_bytes).hexdigest(),
+            )
+anchors:
+  - id: 019ff54c-87f7-74d5-9be7-8ff766f24cd3
+    selector:
+      quote: |-
+        A fresh training run begins from one versioned TOML experiment declaration.
+        Its named sections describe the task vocabulary, curriculum stages and mixture,
+        transformer architecture, rollout collection, reward shaping, auxiliary
+        objective, GRPO update, evaluation schedule, checkpoint schedule, runtime, and
+        artifact location. Ordered values such as curriculum stages retain their
+        declared order.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff54c-87f7-716a-a961-0e04b6851ff1
+        selector:
+          quote: |2-
+                _reject_unknown(
+                    declaration,
+                    {
+                        "schema_version",
+                        "name",
+                        "seed",
+                        "task",
+                        "model",
+                        "rollout",
+                        "reward",
+                        "optimization",
+                        "curriculum",
+                        "training",
+                        "evaluation",
+                        "artifacts",
+                        "runtime",
+                    },
+                    "root",
+                )
+  - id: 019ff54c-87f7-720c-9062-62c09a55bf81
+    selector:
+      quote: |-
+        Loading converts the TOML data into the typed configurations used by the task,
+        policy, trainer, curriculum, and evaluation implementations. Unknown keys,
+        missing required values, invalid types, and mutually incompatible settings are
+        rejected before a model or run directory is created. Defaults inserted during
+        resolution become explicit in the resolved configuration.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff54c-87f7-7572-903e-7a8969ad1b30
+        selector:
+          quote: |2-
+                return RunConfiguration(
+                    schema_version=declaration["schema_version"],
+                    name=declaration["name"],
+                    master_seed=declaration["seed"],
+                    vocabulary=vocabulary,
+                    model=model,
+                    rollout=rollout,
+                    reward=reward,
+                    optimizer=optimizer,
+                    grpo=grpo,
+                    curriculum=curriculum,
+                    training=training,
+                    evaluation=evaluation,
+                    artifacts=artifacts,
+                    runtime=runtime,
+                )
+  - id: 019ff54c-87f7-7095-a814-3c7d1aaf6ed9
+    selector:
+      quote: |-
+        The run retains both the input TOML file verbatim and a canonical resolved
+        configuration record. The command line does not provide a parallel collection
+        of scientific hyperparameter flags. Any supported operational override is
+        included in the resolved record rather than silently changing the declaration.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff54c-87f7-7dca-a10b-64c56f724615
+        selector:
+          quote: |2-
+                source_bytes = source_path.read_bytes()
+                try:
+                    declaration = tomllib.loads(source_bytes.decode("utf-8"))
+                except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+                    raise ConfigurationError(f"invalid TOML configuration: {error}") from error
+                resolved = resolve_run_configuration(
+                    declaration, declaration_directory=source_path.parent
+                )
+                resolved_bytes = _canonical_json_bytes(resolved_configuration_record(resolved))
