@@ -2,7 +2,7 @@ id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
 description: docs/spec/nodes/l2-independent-evaluation.md
 level: L2
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/independent-evaluation
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
 references:
   - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
@@ -21,7 +21,7 @@ anchors:
         reused as training rollouts, and evaluation does not update the policy,
         optimizer, reference policy, or curriculum state.
     links:
-      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+      - id: 019ff503-40c8-7f88-851d-5f0e7dc42b95
         kind: informational
   - id: 019ff06a-a006-7e8c-bc71-6bbfde5b5831
     selector:
@@ -32,7 +32,7 @@ anchors:
         reasoning-trace diagnostics may be reported in addition, but they do not replace
         those primary outcomes.
     links:
-      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+      - id: 019ff503-40c8-728e-87ea-7504bd8e08bc
         kind: informational
   - id: 019ff06a-a006-7b48-b14b-48bead81ff08
     selector:
@@ -43,5 +43,5 @@ anchors:
         metrics remain explicit rather than being merged into the policy's unmodified
         performance.
     links:
-      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+      - id: 019ff503-40c8-728e-87ea-7504bd8e08bc
         kind: informational
