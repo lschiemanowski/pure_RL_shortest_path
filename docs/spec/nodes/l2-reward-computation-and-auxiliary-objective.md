@@ -14,18 +14,25 @@ r_{\mathrm{base}} =
 \end{cases}
 \]
 
-A configured reasoning-coverage bonus and sterile-repetition penalty may be
-added:
+A configured reasoning-coverage bonus may be added:
 
 \[
-r = r_{\mathrm{base}}
-  + \lambda_{\mathrm{coverage}} c
-  - \mathbf{1}_{\mathrm{valid}}
-    \lambda_{\mathrm{sterile}}\rho_m,
+r_{\mathrm{covered}} = r_{\mathrm{base}}
+  + \lambda_{\mathrm{coverage}} c,
 \]
 
 where \(c\) is the fraction of edges in the final answer path that were also
-traversed in the reasoning trace. The configured mode
+traversed in the reasoning trace.
+
+An independently configured sterile-repetition penalty may then be applied:
+
+\[
+r = r_{\mathrm{covered}}
+  - \mathbf{1}_{\mathrm{valid}}
+    \lambda_{\mathrm{sterile}}\rho_m.
+\]
+
+The configured mode
 \(m\in\{\mathrm{all},\mathrm{off\mbox{-}answer}\}\) chooses either the
 sterile-repetition rate over all legal reasoning transitions or the rate after
 excluding transitions on undirected edges in the submitted valid answer. The

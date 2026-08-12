@@ -18,6 +18,7 @@ from pure_rl_shortest_path.rl import (
     group_relative_advantages,
     pack_rollouts,
     reward_from_outcome,
+    sterile_repetition_facts,
     valid_next_token_sets,
 )
 from pure_rl_shortest_path.task import (
@@ -160,12 +161,11 @@ class RewardTests(unittest.TestCase):
             )
         )
         assert outcome.reasoning is not None
+        repetition = sterile_repetition_facts(outcome)
         self.assertAlmostEqual(
-            outcome.reasoning.sterile_repetition_rate_all, 1 / 4
+            repetition.repetition_rate_all, 1 / 4
         )
-        self.assertEqual(
-            outcome.reasoning.sterile_repetition_rate_off_answer, 0.0
-        )
+        self.assertEqual(repetition.repetition_rate_off_answer, 0.0)
 
         all_edges = reward_from_outcome(
             outcome,
@@ -215,6 +215,40 @@ class RewardTests(unittest.TestCase):
                 self.facts((EOS,)),
                 sterile_repetition_mode="oracle",  # type: ignore[arg-type]
             )
+
+    def test_productive_reuse_and_jump_history_are_reward_specific(self) -> None:
+        source, answer_middle, target = self.shortest
+        off_answer = labeled_path(self.example, (0, 2))[1]
+        reasoning = (
+            off_answer,
+            source,
+            answer_middle,
+            source,
+            off_answer,
+            None,
+            source,
+            off_answer,
+        )
+        completion = (
+            *(
+                JUMP if node is None else self.vocabulary.node_token(node)
+                for node in reasoning
+            ),
+            END_REASON,
+            BEGIN_ANSWER,
+            *(self.vocabulary.node_token(node) for node in (source, answer_middle, target)),
+            END_ANSWER,
+            EOS,
+        )
+        outcome = self.facts(completion)
+        repetition = sterile_repetition_facts(outcome)
+
+        self.assertEqual(repetition.legal_transitions, 6)
+        self.assertEqual(repetition.sterile_repetitions_all, 1)
+        self.assertAlmostEqual(repetition.repetition_rate_all, 1 / 6)
+        self.assertEqual(repetition.off_answer_legal_transitions, 4)
+        self.assertEqual(repetition.sterile_repetitions_off_answer, 1)
+        self.assertAlmostEqual(repetition.repetition_rate_off_answer, 1 / 4)
 
 
 class AuxiliaryObjectiveTests(unittest.TestCase):

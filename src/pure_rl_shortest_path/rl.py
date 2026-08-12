@@ -21,6 +21,7 @@ from .task import (
     GraphExample,
     OutcomeFacts,
     Vocabulary,
+    canonical_edge,
     verify_completion,
 )
 
@@ -198,6 +199,16 @@ class RewardComponents:
 
 
 @dataclass(frozen=True)
+class SterileRepetitionFacts:
+    legal_transitions: int
+    sterile_repetitions_all: int
+    repetition_rate_all: float
+    off_answer_legal_transitions: int
+    sterile_repetitions_off_answer: int
+    repetition_rate_off_answer: float
+
+
+@dataclass(frozen=True)
 class Rollout:
     sample: SampledCompletion
     outcome: OutcomeFacts
@@ -216,20 +227,11 @@ class Rollout:
         return self.sample.group_id
 
 
-def reward_from_outcome(
-    outcome: OutcomeFacts,
-    coverage_coefficient: float = 0.0,
-    sterile_repetition_coefficient: float = 0.0,
-    sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer",
-) -> RewardComponents:
-    """Convert verifier facts into explicit base, shaping, and total rewards."""
-
+def verifier_reward_and_coverage(
+    outcome: OutcomeFacts, coverage_coefficient: float
+) -> tuple[float, float, float, float]:
+    """Return base reward, coverage, coefficient, and applied coverage bonus."""
     coefficient = _nonnegative_real(coverage_coefficient, "coverage_coefficient")
-    sterile_coefficient = _nonnegative_real(
-        sterile_repetition_coefficient, "sterile_repetition_coefficient"
-    )
-    if sterile_repetition_mode not in ("all", "off_answer"):
-        raise ValueError("sterile_repetition_mode must be all or off_answer")
     if not outcome.format_ok:
         base_reward = 0.0
     elif not outcome.valid_path:
@@ -244,31 +246,84 @@ def reward_from_outcome(
         if outcome.valid_path and outcome.reasoning is not None
         else 0.0
     )
-    repetition_all = (
-        outcome.reasoning.sterile_repetition_rate_all
-        if outcome.reasoning is not None
-        else 0.0
+    return base_reward, coverage, coefficient, coefficient * coverage
+
+
+def sterile_repetition_facts(outcome: OutcomeFacts) -> SterileRepetitionFacts:
+    """Measure reward-specific unproductive repetition in a reasoning trace."""
+
+    if outcome.reasoning is None:
+        return SterileRepetitionFacts(0, 0, 0.0, 0, 0, 0.0)
+    discovered: set[tuple[int, int]] = set()
+    previous_discovery: dict[tuple[int, int], frozenset[tuple[int, int]]] = {}
+    classified: list[tuple[tuple[int, int], bool]] = []
+    for directed in outcome.reasoning.legal_directed_transitions:
+        edge = canonical_edge(*directed)
+        prior = previous_discovery.get(directed)
+        sterile = prior is not None and prior == frozenset(discovered)
+        discovered.add(edge)
+        previous_discovery[directed] = frozenset(discovered)
+        classified.append((edge, sterile))
+
+    answer_edges = (
+        {
+            canonical_edge(u, v)
+            for u, v in zip(outcome.parsed.answer, outcome.parsed.answer[1:])
+        }
+        if outcome.valid_path
+        else set()
     )
-    repetition_off_answer = (
-        outcome.reasoning.sterile_repetition_rate_off_answer
-        if outcome.reasoning is not None
-        else 0.0
+    off_answer = [
+        sterile for edge, sterile in classified if edge not in answer_edges
+    ]
+    sterile_all = sum(sterile for _, sterile in classified)
+    sterile_off_answer = sum(off_answer)
+    return SterileRepetitionFacts(
+        legal_transitions=len(classified),
+        sterile_repetitions_all=sterile_all,
+        repetition_rate_all=(
+            sterile_all / len(classified) if classified else 0.0
+        ),
+        off_answer_legal_transitions=len(off_answer),
+        sterile_repetitions_off_answer=sterile_off_answer,
+        repetition_rate_off_answer=(
+            sterile_off_answer / len(off_answer) if off_answer else 0.0
+        ),
     )
+
+
+def reward_from_outcome(
+    outcome: OutcomeFacts,
+    coverage_coefficient: float = 0.0,
+    sterile_repetition_coefficient: float = 0.0,
+    sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer",
+) -> RewardComponents:
+    """Compose base reward and separately configured reasoning shaping."""
+
+    base_reward, coverage, coverage_value, coverage_bonus = (
+        verifier_reward_and_coverage(outcome, coverage_coefficient)
+    )
+    sterile_coefficient = _nonnegative_real(
+        sterile_repetition_coefficient, "sterile_repetition_coefficient"
+    )
+    if sterile_repetition_mode not in ("all", "off_answer"):
+        raise ValueError("sterile_repetition_mode must be all or off_answer")
+    repetition = sterile_repetition_facts(outcome)
     selected_repetition = (
-        repetition_all
+        repetition.repetition_rate_all
         if sterile_repetition_mode == "all"
-        else repetition_off_answer
+        else repetition.repetition_rate_off_answer
     )
     sterile_penalty = (
         sterile_coefficient * selected_repetition if outcome.valid_path else 0.0
     )
-    total = base_reward + coefficient * coverage - sterile_penalty
+    total = base_reward + coverage_bonus - sterile_penalty
     return RewardComponents(
         base_reward=base_reward,
         reasoning_coverage=coverage,
-        coverage_coefficient=coefficient,
-        sterile_repetition_rate_all=repetition_all,
-        sterile_repetition_rate_off_answer=repetition_off_answer,
+        coverage_coefficient=coverage_value,
+        sterile_repetition_rate_all=repetition.repetition_rate_all,
+        sterile_repetition_rate_off_answer=repetition.repetition_rate_off_answer,
         sterile_repetition_mode=sterile_repetition_mode,
         sterile_repetition_coefficient=sterile_coefficient,
         sterile_repetition_penalty=sterile_penalty,

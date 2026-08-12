@@ -11,20 +11,11 @@ covers:
   - path: src/pure_rl_shortest_path/rl.py
     selector:
       quote: |-
-        def reward_from_outcome(
-            outcome: OutcomeFacts,
-            coverage_coefficient: float = 0.0,
-            sterile_repetition_coefficient: float = 0.0,
-            sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer",
-        ) -> RewardComponents:
-            """Convert verifier facts into explicit base, shaping, and total rewards."""
-
+        def verifier_reward_and_coverage(
+            outcome: OutcomeFacts, coverage_coefficient: float
+        ) -> tuple[float, float, float, float]:
+            """Return base reward, coverage, coefficient, and applied coverage bonus."""
             coefficient = _nonnegative_real(coverage_coefficient, "coverage_coefficient")
-            sterile_coefficient = _nonnegative_real(
-                sterile_repetition_coefficient, "sterile_repetition_coefficient"
-            )
-            if sterile_repetition_mode not in ("all", "off_answer"):
-                raise ValueError("sterile_repetition_mode must be all or off_answer")
             if not outcome.format_ok:
                 base_reward = 0.0
             elif not outcome.valid_path:
@@ -39,36 +30,7 @@ covers:
                 if outcome.valid_path and outcome.reasoning is not None
                 else 0.0
             )
-            repetition_all = (
-                outcome.reasoning.sterile_repetition_rate_all
-                if outcome.reasoning is not None
-                else 0.0
-            )
-            repetition_off_answer = (
-                outcome.reasoning.sterile_repetition_rate_off_answer
-                if outcome.reasoning is not None
-                else 0.0
-            )
-            selected_repetition = (
-                repetition_all
-                if sterile_repetition_mode == "all"
-                else repetition_off_answer
-            )
-            sterile_penalty = (
-                sterile_coefficient * selected_repetition if outcome.valid_path else 0.0
-            )
-            total = base_reward + coefficient * coverage - sterile_penalty
-            return RewardComponents(
-                base_reward=base_reward,
-                reasoning_coverage=coverage,
-                coverage_coefficient=coefficient,
-                sterile_repetition_rate_all=repetition_all,
-                sterile_repetition_rate_off_answer=repetition_off_answer,
-                sterile_repetition_mode=sterile_repetition_mode,
-                sterile_repetition_coefficient=sterile_coefficient,
-                sterile_repetition_penalty=sterile_penalty,
-                total_reward=total,
-            )
+            return base_reward, coverage, coefficient, coefficient * coverage
 anchors:
   - id: 019ff1ac-85fb-7d8c-afe9-e1a3b63e938b
     selector:
@@ -98,7 +60,17 @@ anchors:
       quote: |-
         For a valid answer only, reasoning coverage \(c\) is the fraction of distinct
         answer edges that also occur among legally traversed reasoning edges. Malformed
-        and invalid answers receive coverage zero.
+        and invalid answers receive coverage zero. Before any other independently
+        configured shaping term, reward is
+
+        \[
+        r_{\mathrm{covered}} = r_{\mathrm{base}}
+          + \lambda_{\mathrm{coverage}}c.
+        \]
+
+        The nonnegative coverage coefficient is configured independently and may be
+        zero. Every rollout records the base reward, coverage, and coefficient
+        separately.
     links:
       - path: src/pure_rl_shortest_path/rl.py
         kind: contractual
@@ -110,48 +82,4 @@ anchors:
                     if outcome.valid_path and outcome.reasoning is not None
                     else 0.0
                 )
-  - id: 019ff5c5-0a59-7238-8c9c-fe0190b149e3
-    selector:
-      quote: |-
-        Outcome verification also supplies the sterile-repetition rates
-        \(\rho_{\mathrm{all}}\) and \(\rho_{\mathrm{off\mbox{-}answer}\). The configured
-        mode \(m\) selects one without changing either diagnostic. The total reward is
-
-        \[
-        r = r_{\mathrm{base}}
-          + \lambda_{\mathrm{coverage}}c
-          - \mathbf{1}_{\mathrm{valid}}
-            \lambda_{\mathrm{sterile}}\rho_m.
-        \]
-
-        Both shaping coefficients are nonnegative, configured independently, and may be
-        zero. The repetition penalty is zero for malformed or invalid answers. Every
-        rollout records the base reward, coverage bonus inputs, both repetition rates,
-        selected repetition mode, coefficients, applied penalty, and total reward
-        separately, so verifier-reward-only and shaped experiments remain
-        distinguishable.
-    links:
-      - path: src/pure_rl_shortest_path/rl.py
-        kind: contractual
-        code_anchor: 019ff5f7-c5bd-79f0-aed8-a648865a3536
-        selector:
-          quote: |2-
-                repetition_all = (
-                    outcome.reasoning.sterile_repetition_rate_all
-                    if outcome.reasoning is not None
-                    else 0.0
-                )
-                repetition_off_answer = (
-                    outcome.reasoning.sterile_repetition_rate_off_answer
-                    if outcome.reasoning is not None
-                    else 0.0
-                )
-                selected_repetition = (
-                    repetition_all
-                    if sterile_repetition_mode == "all"
-                    else repetition_off_answer
-                )
-                sterile_penalty = (
-                    sterile_coefficient * selected_repetition if outcome.valid_path else 0.0
-                )
-                total = base_reward + coefficient * coverage - sterile_penalty
+                return base_reward, coverage, coefficient, coefficient * coverage

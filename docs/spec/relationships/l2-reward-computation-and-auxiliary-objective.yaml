@@ -32,18 +32,30 @@ anchors:
   - id: 019ff5c5-0a59-76da-81cd-620f70e99a64
     selector:
       quote: |-
-        A configured reasoning-coverage bonus and sterile-repetition penalty may be
-        added:
+        A configured reasoning-coverage bonus may be added:
 
         \[
-        r = r_{\mathrm{base}}
-          + \lambda_{\mathrm{coverage}} c
-          - \mathbf{1}_{\mathrm{valid}}
-            \lambda_{\mathrm{sterile}}\rho_m,
+        r_{\mathrm{covered}} = r_{\mathrm{base}}
+          + \lambda_{\mathrm{coverage}} c,
         \]
 
         where \(c\) is the fraction of edges in the final answer path that were also
-        traversed in the reasoning trace. The configured mode
+        traversed in the reasoning trace.
+    links:
+      - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
+        kind: informational
+  - id: 019ff618-792a-7ebb-ab06-1173b1cdcc27
+    selector:
+      quote: |-
+        An independently configured sterile-repetition penalty may then be applied:
+
+        \[
+        r = r_{\mathrm{covered}}
+          - \mathbf{1}_{\mathrm{valid}}
+            \lambda_{\mathrm{sterile}}\rho_m.
+        \]
+
+        The configured mode
         \(m\in\{\mathrm{all},\mathrm{off\mbox{-}answer}\}\) chooses either the
         sterile-repetition rate over all legal reasoning transitions or the rate after
         excluding transitions on undirected edges in the submitted valid answer. The
@@ -51,7 +63,7 @@ anchors:
         coefficient may be zero. Both repetition rates, the selected mode, each shaping
         coefficient, and the total reward remain separately observable.
     links:
-      - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
+      - id: 019ff618-792a-7305-903e-a73612370445
         kind: informational
   - id: 019fef85-58fe-74de-af68-70ec1acff782
     selector:

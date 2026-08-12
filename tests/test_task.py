@@ -219,57 +219,11 @@ class CompletionAndVerificationTests(unittest.TestCase):
         assert facts.reasoning is not None
         self.assertEqual(facts.reasoning.restarts, 1)
         self.assertEqual(facts.reasoning.legal_transitions, 1)
+        self.assertEqual(
+            facts.reasoning.legal_directed_transitions,
+            ((self.example.source, path[1]),),
+        )
         self.assertTrue(facts.reasoning.reaches_target)
-
-    def test_verifier_distinguishes_productive_and_sterile_repetition(self) -> None:
-        path = self.shortest_path()
-        answer_edges = {
-            canonical_edge(u, v) for u, v in zip(path, path[1:])
-        }
-        off_answer_neighbor = next(
-            neighbor
-            for neighbor in self.example.adjacency[self.example.source]
-            if canonical_edge(self.example.source, neighbor) not in answer_edges
-        )
-        reasoning = (
-            off_answer_neighbor,
-            self.example.source,
-            path[1],
-            self.example.source,
-            off_answer_neighbor,
-            None,
-            self.example.source,
-            off_answer_neighbor,
-        )
-        facts = verify_completion(
-            self.example,
-            self.completion(reasoning, path),
-            self.vocabulary,
-        )
-        assert facts.reasoning is not None
-        self.assertEqual(facts.reasoning.restarts, 1)
-        self.assertEqual(facts.reasoning.legal_transitions, 6)
-        self.assertEqual(facts.reasoning.sterile_repetitions_all, 1)
-        self.assertAlmostEqual(
-            facts.reasoning.sterile_repetition_rate_all, 1 / 6
-        )
-        self.assertEqual(facts.reasoning.off_answer_legal_transitions, 4)
-        self.assertEqual(facts.reasoning.sterile_repetitions_off_answer, 1)
-        self.assertAlmostEqual(
-            facts.reasoning.sterile_repetition_rate_off_answer, 1 / 4
-        )
-
-        invalid = verify_completion(
-            self.example,
-            self.completion(reasoning, (self.example.source,)),
-            self.vocabulary,
-        )
-        assert invalid.reasoning is not None
-        self.assertFalse(invalid.valid_path)
-        self.assertEqual(invalid.reasoning.off_answer_legal_transitions, 6)
-        self.assertAlmostEqual(
-            invalid.reasoning.sterile_repetition_rate_off_answer, 1 / 6
-        )
 
 
 if __name__ == "__main__":

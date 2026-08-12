@@ -1,0 +1,200 @@
+id: 019ff618-792a-7305-903e-a73612370445
+description: docs/spec/nodes/l3-sterile-repetition-reward-penalty.md
+level: L3
+scope: pure-rl-shortest-path/reinforcement-learning-trainer/reward-computation-and-auxiliary-objective/sterile-repetition-reward-penalty
+realization: implemented
+parent: 019fef85-58fe-769d-b675-e1466eae3bff
+references:
+  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    kind: contractual
+  - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
+    kind: contractual
+  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+    kind: contractual
+  - id: 019ff566-c44f-7e89-9f82-0d916901384c
+    kind: contractual
+covers:
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class SterileRepetitionFacts:
+            legal_transitions: int
+            sterile_repetitions_all: int
+            repetition_rate_all: float
+            off_answer_legal_transitions: int
+            sterile_repetitions_off_answer: int
+            repetition_rate_off_answer: float
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        def sterile_repetition_facts(outcome: OutcomeFacts) -> SterileRepetitionFacts:
+            """Measure reward-specific unproductive repetition in a reasoning trace."""
+
+            if outcome.reasoning is None:
+                return SterileRepetitionFacts(0, 0, 0.0, 0, 0, 0.0)
+            discovered: set[tuple[int, int]] = set()
+            previous_discovery: dict[tuple[int, int], frozenset[tuple[int, int]]] = {}
+            classified: list[tuple[tuple[int, int], bool]] = []
+            for directed in outcome.reasoning.legal_directed_transitions:
+                edge = canonical_edge(*directed)
+                prior = previous_discovery.get(directed)
+                sterile = prior is not None and prior == frozenset(discovered)
+                discovered.add(edge)
+                previous_discovery[directed] = frozenset(discovered)
+                classified.append((edge, sterile))
+
+            answer_edges = (
+                {
+                    canonical_edge(u, v)
+                    for u, v in zip(outcome.parsed.answer, outcome.parsed.answer[1:])
+                }
+                if outcome.valid_path
+                else set()
+            )
+            off_answer = [
+                sterile for edge, sterile in classified if edge not in answer_edges
+            ]
+            sterile_all = sum(sterile for _, sterile in classified)
+            sterile_off_answer = sum(off_answer)
+            return SterileRepetitionFacts(
+                legal_transitions=len(classified),
+                sterile_repetitions_all=sterile_all,
+                repetition_rate_all=(
+                    sterile_all / len(classified) if classified else 0.0
+                ),
+                off_answer_legal_transitions=len(off_answer),
+                sterile_repetitions_off_answer=sterile_off_answer,
+                repetition_rate_off_answer=(
+                    sterile_off_answer / len(off_answer) if off_answer else 0.0
+                ),
+            )
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        def reward_from_outcome(
+            outcome: OutcomeFacts,
+            coverage_coefficient: float = 0.0,
+            sterile_repetition_coefficient: float = 0.0,
+            sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer",
+        ) -> RewardComponents:
+            """Compose base reward and separately configured reasoning shaping."""
+
+            base_reward, coverage, coverage_value, coverage_bonus = (
+                verifier_reward_and_coverage(outcome, coverage_coefficient)
+            )
+            sterile_coefficient = _nonnegative_real(
+                sterile_repetition_coefficient, "sterile_repetition_coefficient"
+            )
+            if sterile_repetition_mode not in ("all", "off_answer"):
+                raise ValueError("sterile_repetition_mode must be all or off_answer")
+            repetition = sterile_repetition_facts(outcome)
+            selected_repetition = (
+                repetition.repetition_rate_all
+                if sterile_repetition_mode == "all"
+                else repetition.repetition_rate_off_answer
+            )
+            sterile_penalty = (
+                sterile_coefficient * selected_repetition if outcome.valid_path else 0.0
+            )
+            total = base_reward + coverage_bonus - sterile_penalty
+            return RewardComponents(
+                base_reward=base_reward,
+                reasoning_coverage=coverage,
+                coverage_coefficient=coverage_value,
+                sterile_repetition_rate_all=repetition.repetition_rate_all,
+                sterile_repetition_rate_off_answer=repetition.repetition_rate_off_answer,
+                sterile_repetition_mode=sterile_repetition_mode,
+                sterile_repetition_coefficient=sterile_coefficient,
+                sterile_repetition_penalty=sterile_penalty,
+                total_reward=total,
+            )
+anchors:
+  - id: 019ff618-792a-749b-b287-9018d003f891
+    selector:
+      quote: |-
+        This reward term measures unproductive repetition in the reasoning trace. Let
+        \(e_1,\ldots,e_T\) be the ordered legal directed transitions supplied by outcome
+        verification, and let \(D_t\) be the set of distinct undirected graph edges
+        traversed through position \(t\). If \(\tau(t)\) is the preceding occurrence of
+        the same directed transition, occurrence \(t\) is sterile exactly when
+
+        \[
+        \tau(t)\text{ exists}\quad\text{and}\quad D_{t-1}=D_{\tau(t)}.
+        \]
+
+        The history is global across reasoning walks, so a restart does not erase it.
+        A repeated transition is not sterile when a new undirected edge was discovered
+        since its preceding occurrence. Restarts and illegal moves are absent from the
+        input transition sequence and therefore affect neither count.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff618-792a-7aa9-92e7-8a0c0b636bbc
+        selector:
+          quote: |2-
+                for directed in outcome.reasoning.legal_directed_transitions:
+                    edge = canonical_edge(*directed)
+                    prior = previous_discovery.get(directed)
+                    sterile = prior is not None and prior == frozenset(discovered)
+                    discovered.add(edge)
+                    previous_discovery[directed] = frozenset(discovered)
+                    classified.append((edge, sterile))
+  - id: 019ff618-792a-7e04-b550-071c67397fba
+    selector:
+      quote: |-
+        The all-transition rate \(\rho_{\mathrm{all}}\) divides sterile occurrences by
+        \(T\), returning zero for an empty sequence. The off-answer rate
+        \(\rho_{\mathrm{off\mbox{-}answer}}\) first excludes from both numerator and
+        denominator transitions whose undirected edge belongs to the submitted valid
+        answer. If the answer is invalid, no edges are excluded; an empty denominator
+        again gives zero. This uses the submitted answer rather than oracle knowledge
+        of which graph edges belong to any shortest path.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff618-792a-7592-a3a1-5fa64d130a41
+        selector:
+          quote: |2-
+                answer_edges = (
+                    {
+                        canonical_edge(u, v)
+                        for u, v in zip(outcome.parsed.answer, outcome.parsed.answer[1:])
+                    }
+                    if outcome.valid_path
+                    else set()
+                )
+                off_answer = [
+                    sterile for edge, sterile in classified if edge not in answer_edges
+                ]
+  - id: 019ff618-792a-7976-99e7-a477c88df458
+    selector:
+      quote: |-
+        The configured mode \(m\in\{\mathrm{all},\mathrm{off\mbox{-}answer}\}\) selects
+        one rate without suppressing either diagnostic. For a nonnegative independently
+        configured coefficient, the final reward is
+
+        \[
+        r = r_{\mathrm{covered}}
+          - \mathbf{1}_{\mathrm{valid}}
+            \lambda_{\mathrm{sterile}}\rho_m.
+        \]
+
+        Malformed and invalid answers therefore retain repetition diagnostics but
+        receive no penalty. Every rollout records both rates, the selected mode and
+        coefficient, the applied penalty, and total reward separately.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff618-792a-7fe0-813f-21e766e37280
+        selector:
+          quote: |2-
+                selected_repetition = (
+                    repetition.repetition_rate_all
+                    if sterile_repetition_mode == "all"
+                    else repetition.repetition_rate_off_answer
+                )
+                sterile_penalty = (
+                    sterile_coefficient * selected_repetition if outcome.valid_path else 0.0
+                )
+                total = base_reward + coverage_bonus - sterile_penalty
