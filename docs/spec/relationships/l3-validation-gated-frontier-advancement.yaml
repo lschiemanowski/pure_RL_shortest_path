@@ -1,0 +1,161 @@
+id: 019ff4ba-9ea8-7e1b-926c-6879c5018051
+description: docs/spec/nodes/l3-validation-gated-frontier-advancement.md
+level: L3
+scope: pure-rl-shortest-path/experiment-protocol-and-evidence/curriculum-protocol/validation-gated-frontier-advancement
+realization: implemented
+parent: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+references:
+  - id: 019ff4ba-9ea8-722a-a072-7649127d0a6b
+    kind: contractual
+  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    kind: contractual
+covers:
+  - path: src/pure_rl_shortest_path/experiment.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class FrontierValidation:
+            training_step: int
+            frontier: int
+            example_count: int
+            shortest_path_successes: int
+
+            def __post_init__(self) -> None:
+                step = _positive_int(self.training_step, "training_step")
+                frontier = self.frontier
+                if isinstance(frontier, bool) or not isinstance(frontier, int):
+                    raise TypeError("frontier must be an integer")
+                count = _positive_int(self.example_count, "example_count")
+                successes = self.shortest_path_successes
+                if isinstance(successes, bool) or not isinstance(successes, int):
+                    raise TypeError("shortest_path_successes must be an integer")
+                if not 0 <= successes <= count:
+                    raise ValueError("shortest_path_successes must lie within the denominator")
+                object.__setattr__(self, "training_step", step)
+                object.__setattr__(self, "frontier", frontier)
+                object.__setattr__(self, "example_count", count)
+
+            @property
+            def shortest_path_success(self) -> float:
+                return self.shortest_path_successes / self.example_count
+  - path: src/pure_rl_shortest_path/experiment.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class FrontierTransition:
+            training_step: int
+            completed_frontier: int
+            new_frontier: int
+            validation_shortest_path_success: float
+  - path: src/pure_rl_shortest_path/experiment.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class CurriculumValidationDecision:
+            validation: FrontierValidation
+            threshold: float
+            qualified: bool
+            resulting_state: CurriculumState
+            transition: FrontierTransition | None
+  - path: src/pure_rl_shortest_path/experiment.py
+    selector:
+      quote: |-
+        def apply_frontier_validation(
+            curriculum: CurriculumConfig,
+            state: CurriculumState,
+            validation: FrontierValidation,
+        ) -> CurriculumValidationDecision:
+            """Update the monotone frontier from one independent validation result."""
+
+            state.validate_for(curriculum)
+            if validation.frontier != state.frontier:
+                raise ValueError("validation frontier does not match current curriculum state")
+            qualified = validation.shortest_path_success >= curriculum.advancement_threshold
+            streak = state.advancement_streak + 1 if qualified else 0
+            transition = None
+            frontier = state.frontier
+            if (
+                streak >= curriculum.advancement_patience
+                and frontier < len(curriculum.stages) - 1
+            ):
+                transition = FrontierTransition(
+                    training_step=validation.training_step,
+                    completed_frontier=frontier,
+                    new_frontier=frontier + 1,
+                    validation_shortest_path_success=validation.shortest_path_success,
+                )
+                frontier += 1
+                streak = 0
+            resulting_state = CurriculumState(frontier, streak)
+            return CurriculumValidationDecision(
+                validation=validation,
+                threshold=curriculum.advancement_threshold,
+                qualified=qualified,
+                resulting_state=resulting_state,
+                transition=transition,
+            )
+anchors:
+  - id: 019ff4ba-9ea8-7252-88b5-917420afbfd1
+    selector:
+      quote: |-
+        Validation measures the policy on freshly generated problems from the current
+        frontier stage. Validation uses its own random stream, applies the declared
+        evaluation sampling protocol, and does not update the policy or contribute
+        examples to subsequent training rollouts.
+    links:
+      - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+        kind: informational
+  - id: 019ff4ba-9ea8-751c-84fd-125b5222f94f
+    selector:
+      quote: |-
+        After each scheduled validation, the protocol compares shortest-path success
+        with the configured advancement threshold. A qualifying result increments the
+        frontier's advancement streak; a nonqualifying result resets the streak to zero.
+        Once the streak reaches the configured patience and a succeeding stage exists,
+        the frontier advances by exactly one stage and the streak resets.
+    links:
+      - path: src/pure_rl_shortest_path/experiment.py
+        kind: contractual
+        code_anchor: 019ff4ba-9ea8-7a6b-ae33-92ce83e63cca
+        selector:
+          quote: |2-
+                qualified = validation.shortest_path_success >= curriculum.advancement_threshold
+                streak = state.advancement_streak + 1 if qualified else 0
+                transition = None
+                frontier = state.frontier
+                if (
+                    streak >= curriculum.advancement_patience
+                    and frontier < len(curriculum.stages) - 1
+                ):
+  - id: 019ff4ba-9ea8-7821-a9d2-4b0235fe51fe
+    selector:
+      quote: |-
+        Advancement immediately recenters the asymmetric training distribution on the
+        new frontier. There is no current/next-stage interpolation fraction,
+        maximum-mixture condition, or separate mixture-readiness gate. Earlier stages
+        remain available through the backward tail, while future exposure is controlled
+        entirely by the sharply decaying forward tail.
+    links:
+      - id: 019ff4ba-9ea8-722a-a072-7649127d0a6b
+        kind: informational
+  - id: 019ff4ba-9ea8-79ce-a922-b7a0333599f7
+    selector:
+      quote: |-
+        The frontier never retreats and never advances beyond the final stage. Every
+        validation decision retains its example count, frontier, shortest-path success,
+        threshold, qualification result, and resulting streak. Every advancement record
+        identifies the completed frontier, new frontier, training step, and validation
+        result that triggered the transition.
+    links:
+      - path: src/pure_rl_shortest_path/experiment.py
+        kind: contractual
+        code_anchor: 019ff4ba-9ea8-7caa-94bb-c834a34c6207
+        selector:
+          quote: |2-
+                return CurriculumValidationDecision(
+                    validation=validation,
+                    threshold=curriculum.advancement_threshold,
+                    qualified=qualified,
+                    resulting_state=resulting_state,
+                    transition=transition,
+                )

@@ -1,17 +1,17 @@
 # Curriculum protocol
 
 The curriculum protocol defines an ordered sequence of graph-problem
-configurations. At each training step it selects the active stage and any
-declared mixture of problems from the following stage, then supplies those
-problems to the reinforcement-learning trainer. The trainer does not choose or
-alter this distribution.
+configurations and a current frontier within that sequence. At each training
+step, it independently samples the stage of every training problem from a
+declared asymmetric probability distribution over all curriculum stages. The
+distribution is peaked at the frontier, has a broad tail over preceding stages,
+and attenuates sharply over succeeding stages. The trainer receives the
+resulting problems but does not choose or alter their distribution.
 
 The protocol evaluates the current policy on independently generated validation
-problems. Once shortest-path performance reaches a configured interpolation
-threshold, it may gradually increase the fraction of next-stage training
-problems up to a declared maximum. It advances fully to the next stage only
-after the mixture is ready and the configured validation threshold has been met
-for the required number of consecutive validations. Training and validation use
-separate random streams, and validation examples never become training
-rollouts. Each transition records the completed stage and new curriculum
-position.
+problems from the frontier stage. It advances the frontier by one stage only
+after shortest-path performance reaches a configured threshold for the required
+number of consecutive validations. Frontier advancement is monotone and stops
+at the final stage. Training and validation use separate random streams,
+validation examples never become training rollouts, and every validation result
+and frontier transition is recorded.

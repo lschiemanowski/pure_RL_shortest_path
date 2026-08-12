@@ -6,10 +6,10 @@ task and vocabulary semantics, model and learning configuration, random seeds,
 source revision, run lineage, metrics, checkpoints, and representative
 completions needed to resume or audit a run.
 
-The experiment protocol selects the active curriculum stage and any declared
-cross-stage mixture. It may use independent validation measurements to advance
-the curriculum under configured gates, while keeping evaluation examples
-separate from training experience.
+The experiment protocol maintains a curriculum frontier and samples training
+problems from a declared distribution over all curriculum stages. It may use
+independent validation measurements to advance the frontier under configured
+gates, while keeping evaluation examples separate from training experience.
 
 Evaluation measures a selected policy on fresh or fixed independently generated
 problems without updating it. It reports formatting, valid-path, and

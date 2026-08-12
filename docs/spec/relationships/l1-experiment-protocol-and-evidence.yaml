@@ -23,10 +23,10 @@ anchors:
   - id: 019fec40-72c8-7fb1-9e82-f424ee0556ce
     selector:
       quote: |-
-        The experiment protocol selects the active curriculum stage and any declared
-        cross-stage mixture. It may use independent validation measurements to advance
-        the curriculum under configured gates, while keeping evaluation examples
-        separate from training experience.
+        The experiment protocol maintains a curriculum frontier and samples training
+        problems from a declared distribution over all curriculum stages. It may use
+        independent validation measurements to advance the frontier under configured
+        gates, while keeping evaluation examples separate from training experience.
     links:
       - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
         kind: informational
