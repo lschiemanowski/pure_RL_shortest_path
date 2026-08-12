@@ -2,30 +2,58 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
 import math
 from numbers import Real
+import os
 from pathlib import Path
 import platform
+import random
 import re
+import shutil
+import signal
 import subprocess
 import sys
+import threading
 import tomllib
 from typing import Any, Literal, Mapping, Sequence
 import uuid
 
 import torch
 
-from .experiment import CurriculumConfig, EvaluationSamplingConfig
-from .model import TransformerConfig
-from .rl import GRPOConfig, RolloutSamplingConfig
+from .experiment import (
+    CurriculumConfig,
+    CurriculumState,
+    EvaluationProtocol,
+    EvaluationResult,
+    EvaluationSamplingConfig,
+    FrontierValidation,
+    TrainingProblemBatch,
+    apply_frontier_validation,
+    generate_evaluation_problem_set,
+    generate_training_problem_batch,
+    run_evaluation,
+)
+from .model import Transformer, TransformerConfig
+from .rl import (
+    GRPOConfig,
+    Rollout,
+    RolloutSamplingConfig,
+    UpdateMetrics,
+    collect_grouped_completions,
+    evaluate_samples,
+    grpo_update,
+    pack_rollouts,
+)
 from .task import GraphProblemConfig, Vocabulary
 
 
 CONFIG_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 1
+EVIDENCE_SCHEMA_VERSION = 1
 SEED_STREAM_NAMES = (
     "model_initialization",
     "training_problems",
@@ -188,6 +216,10 @@ class ArtifactConfig:
     log_every: int = 10
     checkpoint_every: int = 500
     representative_every: int = 100
+    representative_count: int = 4
+    representative_selection: Literal["first_completion_per_problem"] = (
+        "first_completion_per_problem"
+    )
 
     def __post_init__(self) -> None:
         output_root = Path(self.output_root)
@@ -209,6 +241,18 @@ class ArtifactConfig:
                 self.representative_every, "artifacts.representative_every"
             ),
         )
+        object.__setattr__(
+            self,
+            "representative_count",
+            _positive_int(
+                self.representative_count, "artifacts.representative_count"
+            ),
+        )
+        if self.representative_selection != "first_completion_per_problem":
+            raise ConfigurationError(
+                "artifacts.representative_selection must be "
+                "first_completion_per_problem"
+            )
 
 
 @dataclass(frozen=True)
@@ -315,6 +359,8 @@ def _plain_data(value: object) -> object:
         return {str(key): _plain_data(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
         return [_plain_data(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [_plain_data(item) for item in sorted(value)]
     return value
 
 
@@ -562,6 +608,8 @@ def resolve_run_configuration(
             "log_every",
             "checkpoint_every",
             "representative_every",
+            "representative_count",
+            "representative_selection",
         },
         "artifacts",
     )
@@ -579,6 +627,10 @@ def resolve_run_configuration(
         log_every=artifacts_data.get("log_every", 10),
         checkpoint_every=artifacts_data.get("checkpoint_every", 500),
         representative_every=artifacts_data.get("representative_every", 100),
+        representative_count=artifacts_data.get("representative_count", 4),
+        representative_selection=artifacts_data.get(
+            "representative_selection", "first_completion_per_problem"
+        ),
     )
 
     runtime_data = _table(declaration, "runtime")
@@ -739,6 +791,9 @@ class RunProvenance:
     requested_device: str
     device: str
     dtype: str
+    parent_run_id: str | None = None
+    parent_checkpoint: str | None = None
+    configuration_differences: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -786,6 +841,9 @@ def initialize_run(
     command: Sequence[str] | None = None,
     started_at: datetime | None = None,
     run_id: str | None = None,
+    parent_run_id: str | None = None,
+    parent_checkpoint: str | None = None,
+    configuration_differences: Sequence[str] = (),
 ) -> InitializedRun:
     """Create a fresh, self-identifying run directory before model construction."""
 
@@ -844,6 +902,9 @@ def initialize_run(
         requested_device=configuration.resolved.runtime.device,
         device=resolved_device,
         dtype=configuration.resolved.runtime.dtype,
+        parent_run_id=parent_run_id,
+        parent_checkpoint=parent_checkpoint,
+        configuration_differences=tuple(configuration_differences),
     )
 
     (directory / "experiment.toml").write_bytes(configuration.source_bytes)
@@ -854,3 +915,1208 @@ def initialize_run(
     if source.patch:
         (directory / "source.patch").write_bytes(source.patch)
     return InitializedRun(directory, configuration, provenance)
+
+
+def run_configuration_from_record(record: Mapping[str, Any]) -> RunConfiguration:
+    """Reconstruct and validate a resolved configuration stored as evidence."""
+
+    vocabulary = Vocabulary(**record["vocabulary"])
+    model = TransformerConfig(**record["model"])
+    rollout = RolloutSamplingConfig(**record["rollout"])
+    reward = RewardConfig(**record["reward"])
+    optimizer = OptimizerConfig(**record["optimizer"])
+    grpo = GRPOConfig(**record["grpo"])
+    curriculum_data = record["curriculum"]
+    curriculum = CurriculumConfig(
+        stages=tuple(
+            GraphProblemConfig(**stage) for stage in curriculum_data["stages"]
+        ),
+        past_decay_scale=curriculum_data["past_decay_scale"],
+        future_decay_scale=curriculum_data["future_decay_scale"],
+        advancement_threshold=curriculum_data["advancement_threshold"],
+        advancement_patience=curriculum_data["advancement_patience"],
+    )
+    training = TrainingScheduleConfig(**record["training"])
+    evaluation_data = record["evaluation"]
+    evaluation = EvaluationScheduleConfig(
+        every_steps=evaluation_data["every_steps"],
+        example_count=evaluation_data["example_count"],
+        sampling=EvaluationSamplingConfig(**evaluation_data["sampling"]),
+    )
+    artifacts = ArtifactConfig(
+        output_root=Path(record["artifacts"]["output_root"]),
+        log_every=record["artifacts"]["log_every"],
+        checkpoint_every=record["artifacts"]["checkpoint_every"],
+        representative_every=record["artifacts"]["representative_every"],
+        representative_count=record["artifacts"]["representative_count"],
+        representative_selection=record["artifacts"][
+            "representative_selection"
+        ],
+    )
+    runtime = RuntimeConfig(**record["runtime"])
+    return RunConfiguration(
+        schema_version=record["schema_version"],
+        name=record["name"],
+        master_seed=record["master_seed"],
+        vocabulary=vocabulary,
+        model=model,
+        rollout=rollout,
+        reward=reward,
+        optimizer=optimizer,
+        grpo=grpo,
+        curriculum=curriculum,
+        training=training,
+        evaluation=evaluation,
+        artifacts=artifacts,
+        runtime=runtime,
+    )
+
+
+def configuration_sha256(config: RunConfiguration) -> str:
+    return hashlib.sha256(
+        _canonical_json_bytes(resolved_configuration_record(config))
+    ).hexdigest()
+
+
+def configuration_differences(
+    left: RunConfiguration, right: RunConfiguration
+) -> tuple[str, ...]:
+    """Return stable field-level differences without judging comparability."""
+
+    differences: list[str] = []
+
+    def visit(path: str, first: object, second: object) -> None:
+        if isinstance(first, dict) and isinstance(second, dict):
+            for key in sorted(set(first) | set(second)):
+                child = f"{path}.{key}" if path else key
+                if key not in first or key not in second:
+                    differences.append(child)
+                else:
+                    visit(child, first[key], second[key])
+            return
+        if isinstance(first, list) and isinstance(second, list):
+            if len(first) != len(second):
+                differences.append(f"{path}.length")
+            for index, (left_item, right_item) in enumerate(zip(first, second)):
+                visit(f"{path}[{index}]", left_item, right_item)
+            return
+        if first != second:
+            differences.append(path)
+
+    visit(
+        "",
+        resolved_configuration_record(left),
+        resolved_configuration_record(right),
+    )
+    return tuple(differences)
+
+
+@dataclass
+class NamedRandomStreams:
+    training_problems: random.Random
+    rollout_sampling: torch.Generator
+    curriculum_validation: random.Random
+    evaluation_sampling: torch.Generator
+
+    def state_dict(self) -> dict[str, object]:
+        return {
+            "training_problems": self.training_problems.getstate(),
+            "rollout_sampling": self.rollout_sampling.get_state(),
+            "curriculum_validation": self.curriculum_validation.getstate(),
+            "evaluation_sampling": self.evaluation_sampling.get_state(),
+        }
+
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
+        self.training_problems.setstate(state["training_problems"])
+        self.rollout_sampling.set_state(state["rollout_sampling"])
+        self.curriculum_validation.setstate(state["curriculum_validation"])
+        self.evaluation_sampling.set_state(state["evaluation_sampling"])
+
+
+def create_random_streams(seeds: Mapping[str, int]) -> NamedRandomStreams:
+    missing = sorted(
+        {
+            "training_problems",
+            "rollout_sampling",
+            "curriculum_validation",
+            "evaluation_sampling",
+        }
+        - set(seeds)
+    )
+    if missing:
+        raise ValueError(f"missing named random seeds: {', '.join(missing)}")
+    return NamedRandomStreams(
+        training_problems=random.Random(seeds["training_problems"]),
+        rollout_sampling=torch.Generator().manual_seed(seeds["rollout_sampling"]),
+        curriculum_validation=random.Random(seeds["curriculum_validation"]),
+        evaluation_sampling=torch.Generator().manual_seed(
+            seeds["evaluation_sampling"]
+        ),
+    )
+
+
+def snapshot_reference(reference: Transformer, policy: Transformer) -> None:
+    reference.load_state_dict(policy.state_dict())
+    reference.eval()
+    for parameter in reference.parameters():
+        parameter.requires_grad_(False)
+
+
+CheckpointPurpose = Literal[
+    "periodic", "curriculum_transition", "interruption", "final"
+]
+
+
+@dataclass(frozen=True)
+class LoadedCheckpoint:
+    path: Path
+    run_id: str
+    purpose: CheckpointPurpose
+    step: int
+    curriculum_state: CurriculumState
+    configuration: RunConfiguration
+    configuration_sha256: str
+    payload: Mapping[str, Any]
+
+
+def _atomic_torch_save(value: object, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        torch.save(value, temporary)
+        with temporary.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _atomic_copy(source: Path, destination: Path) -> None:
+    temporary = destination.with_name(
+        f".{destination.name}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        shutil.copyfile(source, temporary)
+        with temporary.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def save_training_checkpoint(
+    run_directory: Path,
+    *,
+    run_id: str,
+    purpose: CheckpointPurpose,
+    step: int,
+    curriculum_state: CurriculumState,
+    configuration: RunConfiguration,
+    policy: Transformer,
+    reference: Transformer,
+    optimizer: torch.optim.Optimizer,
+    random_streams: NamedRandomStreams,
+) -> Path:
+    """Atomically preserve all state needed for exact training continuation."""
+
+    if purpose not in (
+        "periodic",
+        "curriculum_transition",
+        "interruption",
+        "final",
+    ):
+        raise ValueError(f"unknown checkpoint purpose: {purpose}")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise ValueError("checkpoint step must be a nonnegative integer")
+    curriculum_state.validate_for(configuration.curriculum)
+    record = resolved_configuration_record(configuration)
+    digest = configuration_sha256(configuration)
+    payload: dict[str, object] = {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "created_at_utc": datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "run_id": run_id,
+        "purpose": purpose,
+        "step": step,
+        "curriculum_state": asdict(curriculum_state),
+        "configuration": record,
+        "configuration_sha256": digest,
+        "policy": policy.state_dict(),
+        "reference": reference.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "random_streams": random_streams.state_dict(),
+        "torch_rng_state": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        payload["cuda_rng_state"] = torch.cuda.get_rng_state_all()
+    if torch.backends.mps.is_available() and hasattr(torch.mps, "get_rng_state"):
+        payload["mps_rng_state"] = torch.mps.get_rng_state()
+
+    checkpoint_directory = Path(run_directory) / "checkpoints"
+    filename = f"step-{step:09d}-{purpose}.pt"
+    path = checkpoint_directory / filename
+    _atomic_torch_save(payload, path)
+    _atomic_copy(path, checkpoint_directory / "latest.pt")
+    return path
+
+
+def load_training_checkpoint(path: str | Path) -> LoadedCheckpoint:
+    checkpoint_path = Path(path).expanduser().resolve()
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if not isinstance(payload, dict):
+        raise ValueError("checkpoint payload must be a mapping")
+    if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise ValueError("unsupported checkpoint schema version")
+    required = {
+        "run_id",
+        "purpose",
+        "step",
+        "curriculum_state",
+        "configuration",
+        "configuration_sha256",
+        "policy",
+        "reference",
+        "optimizer",
+        "random_streams",
+        "torch_rng_state",
+    }
+    missing = sorted(required - set(payload))
+    if missing:
+        raise ValueError(f"checkpoint is missing: {', '.join(missing)}")
+    configuration = run_configuration_from_record(payload["configuration"])
+    digest = configuration_sha256(configuration)
+    if digest != payload["configuration_sha256"]:
+        raise ValueError("checkpoint configuration digest is invalid")
+    purpose = payload["purpose"]
+    if purpose not in (
+        "periodic",
+        "curriculum_transition",
+        "interruption",
+        "final",
+    ):
+        raise ValueError("checkpoint purpose is invalid")
+    step = payload["step"]
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        raise ValueError("checkpoint step is invalid")
+    state = CurriculumState(**payload["curriculum_state"])
+    state.validate_for(configuration.curriculum)
+    return LoadedCheckpoint(
+        path=checkpoint_path,
+        run_id=_nonempty_string(payload["run_id"], "checkpoint.run_id"),
+        purpose=purpose,
+        step=step,
+        curriculum_state=state,
+        configuration=configuration,
+        configuration_sha256=digest,
+        payload=payload,
+    )
+
+
+def validate_resume_configuration(
+    checkpoint: LoadedCheckpoint,
+    requested: RunConfiguration,
+    *,
+    derived_run: bool,
+) -> tuple[str, ...]:
+    """Reject incompatible parameter semantics and identify permitted changes."""
+
+    if requested.vocabulary != checkpoint.configuration.vocabulary:
+        raise ValueError("requested task vocabulary is incompatible with checkpoint")
+    if requested.model != checkpoint.configuration.model:
+        raise ValueError("requested model architecture is incompatible with checkpoint")
+    if requested.master_seed != checkpoint.configuration.master_seed:
+        raise ValueError("requested master seed is incompatible with checkpoint")
+    if requested.curriculum.stages != checkpoint.configuration.curriculum.stages:
+        raise ValueError(
+            "requested curriculum stages are incompatible with checkpoint"
+        )
+    differences = configuration_differences(checkpoint.configuration, requested)
+    if differences and not derived_run:
+        raise ValueError(
+            "same-run resumption requires the recorded configuration; use a "
+            "derived run for changed experimental settings"
+        )
+    return differences
+
+
+def restore_training_checkpoint(
+    checkpoint: LoadedCheckpoint,
+    *,
+    configuration: RunConfiguration,
+    derived_run: bool,
+    policy: Transformer,
+    reference: Transformer,
+    optimizer: torch.optim.Optimizer,
+    random_streams: NamedRandomStreams,
+) -> tuple[CurriculumState, tuple[str, ...]]:
+    differences = validate_resume_configuration(
+        checkpoint, configuration, derived_run=derived_run
+    )
+    policy.load_state_dict(checkpoint.payload["policy"])
+    reference.load_state_dict(checkpoint.payload["reference"])
+    reference.eval()
+    for parameter in reference.parameters():
+        parameter.requires_grad_(False)
+    optimizer.load_state_dict(checkpoint.payload["optimizer"])
+    random_streams.load_state_dict(checkpoint.payload["random_streams"])
+    torch.set_rng_state(checkpoint.payload["torch_rng_state"])
+    if torch.cuda.is_available() and "cuda_rng_state" in checkpoint.payload:
+        torch.cuda.set_rng_state_all(checkpoint.payload["cuda_rng_state"])
+    if (
+        torch.backends.mps.is_available()
+        and "mps_rng_state" in checkpoint.payload
+        and hasattr(torch.mps, "set_rng_state")
+    ):
+        torch.mps.set_rng_state(checkpoint.payload["mps_rng_state"])
+    return checkpoint.curriculum_state, differences
+
+
+def _append_json_line(path: Path, record: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = _canonical_json_bytes(record)
+    with path.open("ab") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+@dataclass(frozen=True)
+class EvidenceWriter:
+    run_directory: Path
+    run_id: str
+    configuration_sha256: str
+
+    def event(
+        self,
+        kind: str,
+        step: int,
+        payload: Mapping[str, object],
+    ) -> None:
+        record = {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "kind": kind,
+            "run_id": self.run_id,
+            "step": step,
+            "configuration_sha256": self.configuration_sha256,
+            "recorded_at_utc": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            **payload,
+        }
+        _append_json_line(self.run_directory / "metrics.jsonl", record)
+
+    def completion(self, step: int, payload: Mapping[str, object]) -> None:
+        record = {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "kind": "representative_completion",
+            "run_id": self.run_id,
+            "step": step,
+            "configuration_sha256": self.configuration_sha256,
+            **payload,
+        }
+        _append_json_line(self.run_directory / "completions.jsonl", record)
+
+
+def _mean(values: Sequence[float]) -> float:
+    return math.fsum(values) / len(values) if values else 0.0
+
+
+def training_evidence_payload(
+    batch: TrainingProblemBatch,
+    rollouts: Sequence[Rollout],
+    update: UpdateMetrics,
+    configuration: RunConfiguration,
+) -> dict[str, object]:
+    count = len(rollouts)
+    return {
+        "frontier": batch.frontier,
+        "problem_count": len(batch.examples),
+        "rollout_count": count,
+        "stage_probabilities": list(batch.stage_probabilities),
+        "stage_counts": list(batch.stage_counts),
+        "format_successes": sum(rollout.outcome.format_ok for rollout in rollouts),
+        "valid_path_successes": sum(
+            rollout.outcome.valid_path for rollout in rollouts
+        ),
+        "shortest_path_successes": sum(
+            rollout.outcome.shortest for rollout in rollouts
+        ),
+        "mean_base_reward": _mean(
+            [rollout.reward.base_reward for rollout in rollouts]
+        ),
+        "mean_reasoning_coverage": _mean(
+            [rollout.reward.reasoning_coverage for rollout in rollouts]
+        ),
+        "mean_total_reward": _mean(
+            [rollout.reward.total_reward for rollout in rollouts]
+        ),
+        "coverage_coefficient": configuration.reward.coverage_coefficient,
+        "policy_loss": update.policy_loss,
+        "sampled_kl": update.sampled_kl,
+        "valid_next_loss": update.valid_loss,
+        "valid_next_mass": update.valid_mass,
+        "total_loss": update.total_loss,
+        "kl_coefficient": configuration.grpo.kl_coefficient,
+        "valid_coefficient": configuration.grpo.valid_coefficient,
+        "zero_variance_group_fraction": update.zero_variance_group_fraction,
+        "gradient_norm": update.gradient_norm,
+        "sampling": _plain_data(configuration.rollout),
+    }
+
+
+def evaluation_evidence_payload(
+    result: EvaluationResult,
+    *,
+    frontier: int | None,
+) -> dict[str, object]:
+    return {
+        "frontier": frontier,
+        "policy_checkpoint": result.protocol.policy_checkpoint,
+        "problem_set_identity": result.problem_set_identity,
+        "problem_config": _plain_data(result.problem_config),
+        "sampling": _plain_data(result.protocol.sampling),
+        "sampling_seed": result.protocol.sampling_seed,
+        "protocol_kind": result.protocol.kind,
+        "metrics": _plain_data(result.metrics),
+    }
+
+
+def representative_completion_payload(
+    rollout: Rollout,
+    *,
+    vocabulary: Vocabulary,
+    stage_index: int,
+    selection_rule: str,
+) -> dict[str, object]:
+    example = rollout.example
+    return {
+        "selection_rule": selection_rule,
+        "stage_index": stage_index,
+        "graph": {
+            "vertex_count": example.problem.vertex_count,
+            "abstract_edges": _plain_data(example.problem.edges),
+            "abstract_source": example.problem.source,
+            "abstract_target": example.problem.target,
+            "shortest_distance": example.problem.shortest_distance,
+            "label_by_vertex": list(example.label_by_vertex),
+            "visible_edges": _plain_data(example.edges),
+            "serialized_edges": _plain_data(example.serialized_edges),
+            "source": example.source,
+            "target": example.target,
+        },
+        "prompt_tokens": list(example.prompt),
+        "prompt_text": vocabulary.render(example.prompt),
+        "completion_tokens": list(rollout.completion),
+        "completion_text": vocabulary.render(rollout.completion),
+        "terminated_by_eos": rollout.sample.terminated_by_eos,
+        "parsed_and_verified": _plain_data(rollout.outcome),
+        "reward": _plain_data(rollout.reward),
+    }
+
+
+def resolve_autocast_dtype(
+    dtype: str, device: torch.device
+) -> torch.dtype | None:
+    if dtype == "float32":
+        return None
+    if device.type == "cuda":
+        if dtype == "bfloat16":
+            if not torch.cuda.is_bf16_supported():
+                raise RuntimeError("bfloat16 was requested but is unavailable")
+            return torch.bfloat16
+        return torch.float16
+    if device.type == "mps":
+        if dtype == "float16":
+            return torch.float16
+        raise RuntimeError("bfloat16 autocast is not supported on MPS")
+    return None
+
+
+def _build_training_components(
+    configuration: RunConfiguration,
+    *,
+    device: torch.device,
+    seeds: Mapping[str, int],
+) -> tuple[
+    Transformer,
+    Transformer,
+    torch.optim.AdamW,
+    NamedRandomStreams,
+]:
+    torch.manual_seed(seeds["model_initialization"])
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seeds["model_initialization"])
+    policy = Transformer(configuration.model).to(device)
+    reference = Transformer(configuration.model).to(device)
+    snapshot_reference(reference, policy)
+    optimizer = torch.optim.AdamW(
+        policy.parameters(),
+        lr=configuration.optimizer.learning_rate,
+        betas=(configuration.optimizer.beta1, configuration.optimizer.beta2),
+        weight_decay=configuration.optimizer.weight_decay,
+    )
+    streams = create_random_streams(seeds)
+    return policy, reference, optimizer, streams
+
+
+def _apply_optimizer_configuration(
+    optimizer: torch.optim.Optimizer, configuration: OptimizerConfig
+) -> None:
+    for group in optimizer.param_groups:
+        group["lr"] = configuration.learning_rate
+        group["weight_decay"] = configuration.weight_decay
+        group["betas"] = (configuration.beta1, configuration.beta2)
+
+
+@dataclass(frozen=True)
+class TrainingRunResult:
+    run_directory: Path
+    run_id: str
+    final_step: int
+    final_checkpoint: Path
+    curriculum_state: CurriculumState
+
+
+def execute_training(
+    *,
+    run_directory: Path,
+    run_id: str,
+    configuration: RunConfiguration,
+    seeds: Mapping[str, int],
+    checkpoint: LoadedCheckpoint | None = None,
+    derived_run: bool = False,
+    max_steps_override: int | None = None,
+) -> TrainingRunResult:
+    """Run or resume the complete on-policy curriculum training protocol."""
+
+    selected_device = resolve_runtime_device(configuration.runtime.device)
+    device = torch.device(selected_device)
+    autocast_dtype = resolve_autocast_dtype(configuration.runtime.dtype, device)
+    policy, reference, optimizer, streams = _build_training_components(
+        configuration, device=device, seeds=seeds
+    )
+    step = 0
+    curriculum_state = CurriculumState()
+    differences: tuple[str, ...] = ()
+    if checkpoint is not None:
+        curriculum_state, differences = restore_training_checkpoint(
+            checkpoint,
+            configuration=configuration,
+            derived_run=derived_run,
+            policy=policy,
+            reference=reference,
+            optimizer=optimizer,
+            random_streams=streams,
+        )
+        _apply_optimizer_configuration(optimizer, configuration.optimizer)
+        step = checkpoint.step
+
+    maximum_step = (
+        configuration.training.max_steps
+        if max_steps_override is None
+        else _positive_int(max_steps_override, "max_steps_override")
+    )
+    if maximum_step < step:
+        raise ValueError("maximum training step precedes the checkpoint step")
+    writer = EvidenceWriter(
+        Path(run_directory), run_id, configuration_sha256(configuration)
+    )
+    writer.event(
+        "run_started" if checkpoint is None else "run_resumed",
+        step,
+        {
+            "maximum_step": maximum_step,
+            "parent_checkpoint": str(checkpoint.path) if checkpoint else None,
+            "configuration_differences": list(differences),
+            "derived_run": derived_run,
+        },
+    )
+
+    latest_checkpoint: Path | None = checkpoint.path if checkpoint else None
+    interrupt_requested = False
+    safe_to_checkpoint = True
+    previous_sigint: object | None = None
+
+    def defer_sigint(_signum: int, _frame: object) -> None:
+        nonlocal interrupt_requested
+        if interrupt_requested:
+            raise KeyboardInterrupt
+        interrupt_requested = True
+
+    if threading.current_thread() is threading.main_thread():
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, defer_sigint)
+    try:
+        while step < maximum_step:
+            safe_to_checkpoint = False
+            batch = generate_training_problem_batch(
+                configuration.curriculum,
+                curriculum_state,
+                configuration.vocabulary,
+                configuration.training.problems_per_step,
+                streams.training_problems,
+            )
+            samples = collect_grouped_completions(
+                policy,
+                batch.examples,
+                configuration.rollout,
+                device=device,
+                generator=streams.rollout_sampling,
+                autocast_dtype=autocast_dtype,
+            )
+            rollouts = evaluate_samples(
+                samples,
+                configuration.vocabulary,
+                configuration.reward.coverage_coefficient,
+            )
+            packed = pack_rollouts(
+                rollouts, configuration.vocabulary, device=device
+            )
+            update = grpo_update(
+                policy,
+                reference,
+                optimizer,
+                packed,
+                configuration.grpo,
+                autocast_dtype=autocast_dtype,
+            )
+            step += 1
+
+            if step % configuration.training.reference_update_every == 0:
+                snapshot_reference(reference, policy)
+                writer.event("reference_updated", step, {})
+
+            if step % configuration.artifacts.log_every == 0 or step == 1:
+                writer.event(
+                    "training",
+                    step,
+                    training_evidence_payload(
+                        batch, rollouts, update, configuration
+                    ),
+                )
+
+            if step % configuration.artifacts.representative_every == 0:
+                selected = rollouts[:: configuration.rollout.group_size][
+                    : configuration.artifacts.representative_count
+                ]
+                for rollout in selected:
+                    writer.completion(
+                        step,
+                        representative_completion_payload(
+                            rollout,
+                            vocabulary=configuration.vocabulary,
+                            stage_index=batch.stage_indices[rollout.group_id],
+                            selection_rule=(
+                                configuration.artifacts.representative_selection
+                            ),
+                        ),
+                    )
+
+            transitioned = False
+            if step % configuration.evaluation.every_steps == 0:
+                generation_seed = streams.curriculum_validation.randrange(2**63)
+                problem_set = generate_evaluation_problem_set(
+                    configuration.curriculum.stages[curriculum_state.frontier],
+                    configuration.vocabulary,
+                    configuration.evaluation.example_count,
+                    generation_seed,
+                )
+                sampling_seed = None
+                if configuration.evaluation.sampling.mode == "stochastic":
+                    sampling_seed = int(
+                        torch.randint(
+                            0,
+                            2**63 - 1,
+                            (1,),
+                            generator=streams.evaluation_sampling,
+                        ).item()
+                    )
+                protocol = EvaluationProtocol(
+                    policy_checkpoint=f"{run_id}:live-step-{step}",
+                    sampling=configuration.evaluation.sampling,
+                    sampling_seed=sampling_seed,
+                )
+                evaluation = run_evaluation(
+                    policy,
+                    protocol,
+                    problem_set,
+                    configuration.vocabulary,
+                    device=device,
+                    autocast_dtype=autocast_dtype,
+                )
+                writer.event(
+                    "evaluation",
+                    step,
+                    evaluation_evidence_payload(
+                        evaluation, frontier=curriculum_state.frontier
+                    ),
+                )
+                decision = apply_frontier_validation(
+                    configuration.curriculum,
+                    curriculum_state,
+                    FrontierValidation(
+                        training_step=step,
+                        frontier=curriculum_state.frontier,
+                        example_count=evaluation.metrics.example_count,
+                        shortest_path_successes=(
+                            evaluation.metrics.shortest_path_successes
+                        ),
+                    ),
+                )
+                curriculum_state = decision.resulting_state
+                writer.event(
+                    "curriculum_validation",
+                    step,
+                    {
+                        "frontier": decision.validation.frontier,
+                        "example_count": decision.validation.example_count,
+                        "shortest_path_successes": (
+                            decision.validation.shortest_path_successes
+                        ),
+                        "threshold": decision.threshold,
+                        "qualified": decision.qualified,
+                        "resulting_frontier": curriculum_state.frontier,
+                        "resulting_streak": curriculum_state.advancement_streak,
+                        "transition": _plain_data(decision.transition),
+                    },
+                )
+                if decision.transition is not None:
+                    transitioned = True
+                    latest_checkpoint = save_training_checkpoint(
+                        Path(run_directory),
+                        run_id=run_id,
+                        purpose="curriculum_transition",
+                        step=step,
+                        curriculum_state=curriculum_state,
+                        configuration=configuration,
+                        policy=policy,
+                        reference=reference,
+                        optimizer=optimizer,
+                        random_streams=streams,
+                    )
+
+            if (
+                step % configuration.artifacts.checkpoint_every == 0
+                and not transitioned
+            ):
+                latest_checkpoint = save_training_checkpoint(
+                    Path(run_directory),
+                    run_id=run_id,
+                    purpose="periodic",
+                    step=step,
+                    curriculum_state=curriculum_state,
+                    configuration=configuration,
+                    policy=policy,
+                    reference=reference,
+                    optimizer=optimizer,
+                    random_streams=streams,
+                )
+            safe_to_checkpoint = True
+            if interrupt_requested:
+                raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        if not safe_to_checkpoint:
+            writer.event(
+                "run_interrupted_unsafe_boundary",
+                step,
+                {
+                    "last_usable_checkpoint": (
+                        str(latest_checkpoint) if latest_checkpoint else None
+                    )
+                },
+            )
+            raise
+        latest_checkpoint = save_training_checkpoint(
+            Path(run_directory),
+            run_id=run_id,
+            purpose="interruption",
+            step=step,
+            curriculum_state=curriculum_state,
+            configuration=configuration,
+            policy=policy,
+            reference=reference,
+            optimizer=optimizer,
+            random_streams=streams,
+        )
+        writer.event(
+            "run_interrupted", step, {"checkpoint": str(latest_checkpoint)}
+        )
+        raise
+    finally:
+        if previous_sigint is not None:
+            signal.signal(signal.SIGINT, previous_sigint)
+
+    final_checkpoint = save_training_checkpoint(
+        Path(run_directory),
+        run_id=run_id,
+        purpose="final",
+        step=step,
+        curriculum_state=curriculum_state,
+        configuration=configuration,
+        policy=policy,
+        reference=reference,
+        optimizer=optimizer,
+        random_streams=streams,
+    )
+    writer.event(
+        "run_completed", step, {"checkpoint": str(final_checkpoint)}
+    )
+    return TrainingRunResult(
+        Path(run_directory), run_id, step, final_checkpoint, curriculum_state
+    )
+
+
+def start_training_run(
+    configuration_path: str | Path,
+    *,
+    source_repository: str | Path,
+    command: Sequence[str] | None = None,
+) -> TrainingRunResult:
+    loaded = load_run_configuration(configuration_path)
+    initialized = initialize_run(
+        loaded, source_repository=source_repository, command=command
+    )
+    return execute_training(
+        run_directory=initialized.directory,
+        run_id=initialized.provenance.run_id,
+        configuration=loaded.resolved,
+        seeds=initialized.provenance.seeds,
+    )
+
+
+def _checkpoint_run_directory(checkpoint: LoadedCheckpoint) -> Path:
+    if checkpoint.path.parent.name != "checkpoints":
+        raise ValueError("checkpoint must be located in a run's checkpoints directory")
+    run_directory = checkpoint.path.parent.parent
+    if not (run_directory / "provenance.json").is_file():
+        raise ValueError("checkpoint run directory has no provenance record")
+    return run_directory
+
+
+def resume_training_run(
+    checkpoint_path: str | Path,
+    *,
+    source_repository: str | Path,
+    configuration_path: str | Path | None = None,
+    max_steps: int | None = None,
+    command: Sequence[str] | None = None,
+) -> TrainingRunResult:
+    checkpoint = load_training_checkpoint(checkpoint_path)
+    source_run_directory = _checkpoint_run_directory(checkpoint)
+    source_provenance = json.loads(
+        (source_run_directory / "provenance.json").read_text(encoding="utf-8")
+    )
+    if source_provenance.get("run_id") != checkpoint.run_id:
+        raise ValueError("checkpoint and run provenance identities disagree")
+    seeds = source_provenance.get("seeds")
+    if not isinstance(seeds, dict):
+        raise ValueError("run provenance has no named random seeds")
+
+    if configuration_path is None:
+        source = inspect_source_provenance(source_repository)
+        if source.dirty and not checkpoint.configuration.runtime.allow_dirty_source:
+            raise RuntimeError("source tree is dirty during same-run resumption")
+        if source.revision != source_provenance.get("source_revision"):
+            raise RuntimeError(
+                "same-run resumption requires the originating source revision; "
+                "provide a configuration to create a derived run"
+            )
+        writer = EvidenceWriter(
+            source_run_directory,
+            checkpoint.run_id,
+            checkpoint.configuration_sha256,
+        )
+        writer.event(
+            "resume_requested",
+            checkpoint.step,
+            {
+                "checkpoint": str(checkpoint.path),
+                "command": list(command or sys.argv),
+                "max_steps_override": max_steps,
+            },
+        )
+        return execute_training(
+            run_directory=source_run_directory,
+            run_id=checkpoint.run_id,
+            configuration=checkpoint.configuration,
+            seeds=seeds,
+            checkpoint=checkpoint,
+            max_steps_override=max_steps,
+        )
+
+    requested = load_run_configuration(configuration_path)
+    differences = validate_resume_configuration(
+        checkpoint, requested.resolved, derived_run=True
+    )
+    initialized = initialize_run(
+        requested,
+        source_repository=source_repository,
+        command=command,
+        parent_run_id=checkpoint.run_id,
+        parent_checkpoint=str(checkpoint.path),
+        configuration_differences=differences,
+    )
+    return execute_training(
+        run_directory=initialized.directory,
+        run_id=initialized.provenance.run_id,
+        configuration=requested.resolved,
+        seeds=seeds,
+        checkpoint=checkpoint,
+        derived_run=True,
+        max_steps_override=max_steps,
+    )
+
+
+@dataclass(frozen=True)
+class DeclaredEvaluationSet:
+    name: str
+    problem_config: GraphProblemConfig
+    example_count: int
+    generation_seed: int
+    sampling_seed: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _nonempty_string(self.name, "set.name"))
+        object.__setattr__(
+            self,
+            "example_count",
+            _positive_int(self.example_count, "set.example_count"),
+        )
+        seed = _plain_int(self.generation_seed, "set.generation_seed")
+        if not 0 <= seed < 2**63:
+            raise ConfigurationError("set.generation_seed must lie in [0, 2^63)")
+        if self.sampling_seed is not None:
+            sampling_seed = _plain_int(
+                self.sampling_seed, "set.sampling_seed"
+            )
+            if not 0 <= sampling_seed < 2**63:
+                raise ConfigurationError(
+                    "set.sampling_seed must lie in [0, 2^63)"
+                )
+
+
+@dataclass(frozen=True)
+class StandaloneEvaluationConfig:
+    schema_version: int
+    name: str
+    sampling: EvaluationSamplingConfig
+    sets: tuple[DeclaredEvaluationSet, ...]
+    output_root: Path
+    runtime: RuntimeConfig
+
+    def __post_init__(self) -> None:
+        if self.schema_version != CONFIG_SCHEMA_VERSION:
+            raise ConfigurationError("unsupported evaluation schema version")
+        object.__setattr__(self, "name", _nonempty_string(self.name, "name"))
+        sets = tuple(self.sets)
+        if not sets:
+            raise ConfigurationError("evaluation requires at least one set")
+        if len({item.name for item in sets}) != len(sets):
+            raise ConfigurationError("evaluation set names must be unique")
+        for item in sets:
+            if self.sampling.mode == "greedy" and item.sampling_seed is not None:
+                raise ConfigurationError(
+                    "greedy evaluation sets do not use sampling_seed"
+                )
+            if self.sampling.mode == "stochastic" and item.sampling_seed is None:
+                raise ConfigurationError(
+                    "stochastic evaluation sets require sampling_seed"
+                )
+        object.__setattr__(self, "sets", sets)
+        object.__setattr__(self, "output_root", Path(self.output_root))
+
+
+def load_standalone_evaluation_config(
+    path: str | Path,
+) -> StandaloneEvaluationConfig:
+    source_path = Path(path).expanduser().resolve()
+    try:
+        declaration = tomllib.loads(source_path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ConfigurationError(f"invalid evaluation TOML: {error}") from error
+    _reject_unknown(
+        declaration,
+        {"schema_version", "name", "sampling", "sets", "artifacts", "runtime"},
+        "root",
+    )
+    sampling_data = _table(declaration, "sampling", required=True)
+    _reject_unknown(
+        sampling_data,
+        {"max_new_tokens", "batch_size", "mode", "temperature", "top_p"},
+        "sampling",
+    )
+    if "max_new_tokens" not in sampling_data:
+        raise ConfigurationError("missing required key: sampling.max_new_tokens")
+    sampling = EvaluationSamplingConfig(**sampling_data)
+    sets_data = declaration.get("sets")
+    if not isinstance(sets_data, list):
+        raise ConfigurationError("sets must be an array of tables")
+    declared_sets = []
+    allowed_set_keys = {
+        "name",
+        "vertices",
+        "edges",
+        "min_distance",
+        "max_distance",
+        "generation_attempts",
+        "example_count",
+        "generation_seed",
+        "sampling_seed",
+    }
+    for index, item in enumerate(sets_data):
+        if not isinstance(item, dict):
+            raise ConfigurationError(f"sets[{index}] must be a table")
+        _reject_unknown(item, allowed_set_keys, f"sets[{index}]")
+        required = {
+            "name",
+            "vertices",
+            "edges",
+            "min_distance",
+            "max_distance",
+            "example_count",
+            "generation_seed",
+        }
+        missing = sorted(required - set(item))
+        if missing:
+            raise ConfigurationError(
+                f"sets[{index}] is missing: {', '.join(missing)}"
+            )
+        declared_sets.append(
+            DeclaredEvaluationSet(
+                name=item["name"],
+                problem_config=GraphProblemConfig(
+                    vertices=item["vertices"],
+                    edges=item["edges"],
+                    min_distance=item["min_distance"],
+                    max_distance=item["max_distance"],
+                    generation_attempts=item.get("generation_attempts", 100),
+                ),
+                example_count=item["example_count"],
+                generation_seed=item["generation_seed"],
+                sampling_seed=item.get("sampling_seed"),
+            )
+        )
+    artifacts = _table(declaration, "artifacts", required=True)
+    _reject_unknown(artifacts, {"output_root"}, "artifacts")
+    if "output_root" not in artifacts:
+        raise ConfigurationError("missing required key: artifacts.output_root")
+    output_root = Path(
+        _nonempty_string(artifacts["output_root"], "artifacts.output_root")
+    ).expanduser()
+    if not output_root.is_absolute():
+        output_root = source_path.parent / output_root
+    runtime_data = _table(declaration, "runtime")
+    _reject_unknown(runtime_data, {"device", "dtype"}, "runtime")
+    runtime = RuntimeConfig(
+        device=runtime_data.get("device", "auto"),
+        dtype=runtime_data.get("dtype", "bfloat16"),
+        allow_dirty_source=False,
+    )
+    for key in ("schema_version", "name"):
+        if key not in declaration:
+            raise ConfigurationError(f"missing required key: {key}")
+    return StandaloneEvaluationConfig(
+        schema_version=declaration["schema_version"],
+        name=declaration["name"],
+        sampling=sampling,
+        sets=tuple(declared_sets),
+        output_root=output_root.resolve(),
+        runtime=runtime,
+    )
+
+
+@dataclass(frozen=True)
+class StandaloneEvaluationResult:
+    directory: Path
+    evaluation_id: str
+    results: tuple[EvaluationResult, ...]
+
+
+def execute_standalone_evaluation(
+    checkpoint_path: str | Path,
+    evaluation_configuration_path: str | Path,
+) -> StandaloneEvaluationResult:
+    checkpoint = load_training_checkpoint(checkpoint_path)
+    declaration = load_standalone_evaluation_config(
+        evaluation_configuration_path
+    )
+    for item in declaration.sets:
+        if (
+            item.problem_config.vertices
+            > checkpoint.configuration.vocabulary.node_label_count
+        ):
+            raise ValueError(
+                f"evaluation set {item.name} exceeds the checkpoint vocabulary"
+            )
+    device = torch.device(resolve_runtime_device(declaration.runtime.device))
+    autocast_dtype = resolve_autocast_dtype(declaration.runtime.dtype, device)
+    policy = Transformer(checkpoint.configuration.model).to(device)
+    policy.load_state_dict(checkpoint.payload["policy"])
+    policy.eval()
+
+    evaluation_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    directory = declaration.output_root / (
+        f"{_run_slug(declaration.name)}_{timestamp}_{evaluation_id[:8]}"
+    )
+    directory.mkdir(parents=True, exist_ok=False)
+    results = []
+    for item in declaration.sets:
+        problem_set = generate_evaluation_problem_set(
+            item.problem_config,
+            checkpoint.configuration.vocabulary,
+            item.example_count,
+            item.generation_seed,
+        )
+        protocol = EvaluationProtocol(
+            policy_checkpoint=str(checkpoint.path),
+            sampling=declaration.sampling,
+            sampling_seed=item.sampling_seed,
+        )
+        result = run_evaluation(
+            policy,
+            protocol,
+            problem_set,
+            checkpoint.configuration.vocabulary,
+            device=device,
+            autocast_dtype=autocast_dtype,
+        )
+        results.append(result)
+        _append_json_line(
+            directory / "metrics.jsonl",
+            {
+                "schema_version": EVIDENCE_SCHEMA_VERSION,
+                "kind": "evaluation",
+                "evaluation_id": evaluation_id,
+                "evaluation_name": declaration.name,
+                "set_name": item.name,
+                "checkpoint_run_id": checkpoint.run_id,
+                "checkpoint": str(checkpoint.path),
+                "checkpoint_step": checkpoint.step,
+                "checkpoint_configuration_sha256": (
+                    checkpoint.configuration_sha256
+                ),
+                **evaluation_evidence_payload(result, frontier=None),
+            },
+        )
+        for case in result.cases:
+            _append_json_line(
+                directory / "completions.jsonl",
+                {
+                    "schema_version": EVIDENCE_SCHEMA_VERSION,
+                    "kind": "evaluation_completion",
+                    "evaluation_id": evaluation_id,
+                    "set_name": item.name,
+                    "problem": _plain_data(case.completion.example),
+                    "completion_tokens": list(case.completion.completion),
+                    "completion_text": checkpoint.configuration.vocabulary.render(
+                        case.completion.completion
+                    ),
+                    "terminated_by_eos": case.completion.terminated_by_eos,
+                    "outcome": _plain_data(case.outcome),
+                },
+            )
+    return StandaloneEvaluationResult(directory, evaluation_id, tuple(results))

@@ -2,7 +2,7 @@ id: 019feb9e-e54d-7450-bdf0-d2831a73da31
 description: docs/spec/nodes/l1-experiment-protocol-and-evidence.md
 level: L1
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence
-realization: unimplemented
+realization: implemented
 parent: 019feb83-80f6-786a-bf25-d637dd4a6af1
 anchors:
   - id: 019feb9e-e54d-7876-813a-dd66947f9e39

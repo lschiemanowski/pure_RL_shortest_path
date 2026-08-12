@@ -144,6 +144,8 @@ output_root = "../runs"
 log_every = 10
 checkpoint_every = 500
 representative_every = 100
+representative_count = 4
+representative_selection = "first_completion_per_problem"
 
 [runtime]
 device = "auto"

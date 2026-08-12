@@ -2,7 +2,7 @@ id: 019ff06a-a006-7d37-9c30-0fdce285ab2b
 description: docs/spec/nodes/l2-evidence-recording-and-comparability.md
 level: L2
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/evidence-recording-and-comparability
-realization: unimplemented
+realization: implemented
 parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
 references:
   - id: 019ff06a-a005-793f-92cd-fda20e6db21c
@@ -23,6 +23,8 @@ anchors:
     links:
       - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
         kind: informational
+      - id: 019ff566-c44f-7e89-9f82-0d916901384c
+        kind: informational
   - id: 019ff06a-a006-7c72-aee9-9e6017cf6c3e
     selector:
       quote: |-
@@ -34,6 +36,8 @@ anchors:
         the reported outcome was obtained.
     links:
       - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
+      - id: 019ff566-c44f-7e89-9f82-0d916901384c
         kind: informational
   - id: 019ff06a-a006-7a32-80fb-242c36278a12
     selector:
@@ -47,4 +51,6 @@ anchors:
         appropriate.
     links:
       - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
+      - id: 019ff566-c44f-7e89-9f82-0d916901384c
         kind: informational

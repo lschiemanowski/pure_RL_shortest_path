@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pure-rl-shortest-path"
+version = "0.1.0"
+description = "Pure-RL transformer experiments for synthetic shortest paths"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["torch>=2.5"]
+
+[project.scripts]
+pure-rl-shortest-path = "pure_rl_shortest_path.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

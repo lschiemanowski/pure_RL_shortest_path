@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -8,13 +9,21 @@ import subprocess
 import tempfile
 import unittest
 
+import torch
+
 from pure_rl_shortest_path.run import (
     CONFIG_SCHEMA_VERSION,
     ConfigurationError,
     LoadedRunConfiguration,
+    configuration_differences,
     derive_named_seeds,
+    execute_standalone_evaluation,
+    execute_training,
     initialize_run,
+    load_standalone_evaluation_config,
+    load_training_checkpoint,
     load_run_configuration,
+    validate_resume_configuration,
 )
 
 
@@ -86,6 +95,27 @@ device = "cpu"
 dtype = "float32"
 allow_dirty_source = false
 """
+
+
+def fast_config() -> str:
+    return (
+        BASE_CONFIG.replace("max_context_length = 128", "max_context_length = 64")
+        .replace("layers = 2", "layers = 1")
+        .replace("group_size = 4", "group_size = 2")
+        .replace("max_new_tokens = 32", "max_new_tokens = 8")
+        .replace(
+            "learning_rate = 3e-4\n",
+            "learning_rate = 3e-4\nupdate_epochs = 1\nmicrobatch_size = 2\n",
+        )
+        .replace("max_steps = 100", "max_steps = 1")
+        .replace("problems_per_step = 3", "problems_per_step = 1")
+        .replace("reference_update_every = 10", "reference_update_every = 1")
+        .replace("every_steps = 20", "every_steps = 1")
+        .replace("example_count = 8", "example_count = 2")
+        .replace("log_every = 5", "log_every = 1")
+        .replace("checkpoint_every = 20", "checkpoint_every = 1")
+        .replace("representative_every = 20", "representative_every = 1")
+    )
 
 
 def run_git(repository: Path, *arguments: str) -> None:
@@ -264,6 +294,175 @@ class RunInitializationTests(unittest.TestCase):
             provenance["source_patch_sha256"],
             hashlib.sha256(patch.encode()).hexdigest(),
         )
+
+
+class CheckpointEvidenceAndLoopTests(unittest.TestCase):
+    def load_fast(self, root: Path):
+        path = root / "fast.toml"
+        path.write_text(fast_config(), encoding="utf-8")
+        return load_run_configuration(path)
+
+    def test_split_resume_matches_uninterrupted_training_exactly(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            loaded = self.load_fast(root)
+            seeds = derive_named_seeds(loaded.resolved.master_seed)
+            uninterrupted = root / "uninterrupted"
+            split = root / "split"
+            uninterrupted.mkdir()
+            split.mkdir()
+
+            full_result = execute_training(
+                run_directory=uninterrupted,
+                run_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                configuration=loaded.resolved,
+                seeds=seeds,
+                max_steps_override=2,
+            )
+            first_result = execute_training(
+                run_directory=split,
+                run_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                configuration=loaded.resolved,
+                seeds=seeds,
+            )
+            checkpoint = load_training_checkpoint(first_result.final_checkpoint)
+            resumed_result = execute_training(
+                run_directory=split,
+                run_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                configuration=loaded.resolved,
+                seeds=seeds,
+                checkpoint=checkpoint,
+                max_steps_override=2,
+            )
+
+            full = load_training_checkpoint(full_result.final_checkpoint)
+            resumed = load_training_checkpoint(resumed_result.final_checkpoint)
+            self.assertEqual(full.step, 2)
+            self.assertEqual(resumed.step, 2)
+            self.assertEqual(full.curriculum_state, resumed.curriculum_state)
+            for name, tensor in full.payload["policy"].items():
+                self.assertTrue(torch.equal(tensor, resumed.payload["policy"][name]))
+            self.assertTrue((split / "checkpoints" / "latest.pt").is_file())
+
+            metrics = [
+                json.loads(line)
+                for line in (split / "metrics.jsonl").read_text().splitlines()
+            ]
+            kinds = {record["kind"] for record in metrics}
+            self.assertIn("training", kinds)
+            self.assertIn("evaluation", kinds)
+            self.assertIn("curriculum_validation", kinds)
+            self.assertIn("run_resumed", kinds)
+            self.assertIn("run_completed", kinds)
+            completions = (split / "completions.jsonl").read_text().splitlines()
+            self.assertEqual(len(completions), 2)
+            representative = json.loads(completions[0])
+            self.assertIn("prompt_tokens", representative)
+            self.assertIn("parsed_and_verified", representative)
+            self.assertIn("reward", representative)
+
+    def test_resume_compatibility_separates_hard_and_derived_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            loaded = self.load_fast(root)
+            run_directory = root / "run"
+            run_directory.mkdir()
+            result = execute_training(
+                run_directory=run_directory,
+                run_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                configuration=loaded.resolved,
+                seeds=derive_named_seeds(17),
+            )
+            checkpoint = load_training_checkpoint(result.final_checkpoint)
+
+            changed_reward = replace(
+                loaded.resolved,
+                reward=replace(
+                    loaded.resolved.reward, coverage_coefficient=0.25
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "derived run"):
+                validate_resume_configuration(
+                    checkpoint, changed_reward, derived_run=False
+                )
+            differences = validate_resume_configuration(
+                checkpoint, changed_reward, derived_run=True
+            )
+            self.assertIn("reward.coverage_coefficient", differences)
+
+            changed_model = replace(
+                loaded.resolved,
+                model=replace(loaded.resolved.model, n_layers=2),
+            )
+            with self.assertRaisesRegex(ValueError, "model architecture"):
+                validate_resume_configuration(
+                    checkpoint, changed_model, derived_run=True
+                )
+            self.assertIn(
+                "reward.coverage_coefficient",
+                configuration_differences(loaded.resolved, changed_reward),
+            )
+
+    def test_standalone_evaluation_is_declared_and_nonmutating(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            loaded = self.load_fast(root)
+            run_directory = root / "run"
+            run_directory.mkdir()
+            training = execute_training(
+                run_directory=run_directory,
+                run_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                configuration=loaded.resolved,
+                seeds=derive_named_seeds(17),
+            )
+            before = load_training_checkpoint(training.final_checkpoint)
+            evaluation_path = root / "evaluation.toml"
+            evaluation_path.write_text(
+                """\
+schema_version = 1
+name = "tiny-greedy"
+
+[sampling]
+max_new_tokens = 8
+batch_size = 2
+mode = "greedy"
+
+[[sets]]
+name = "tiny"
+vertices = 4
+edges = 3
+min_distance = 1
+max_distance = 2
+example_count = 2
+generation_seed = 123
+
+[artifacts]
+output_root = "evaluations"
+
+[runtime]
+device = "cpu"
+dtype = "float32"
+""",
+                encoding="utf-8",
+            )
+            declaration = load_standalone_evaluation_config(evaluation_path)
+            self.assertEqual(declaration.sets[0].generation_seed, 123)
+            evaluated = execute_standalone_evaluation(
+                training.final_checkpoint, evaluation_path
+            )
+            self.assertEqual(len(evaluated.results), 1)
+            self.assertEqual(evaluated.results[0].metrics.example_count, 2)
+            self.assertEqual(
+                len(
+                    (evaluated.directory / "completions.jsonl")
+                    .read_text()
+                    .splitlines()
+                ),
+                2,
+            )
+            after = load_training_checkpoint(training.final_checkpoint)
+            for name, tensor in before.payload["policy"].items():
+                self.assertTrue(torch.equal(tensor, after.payload["policy"][name]))
 
 
 if __name__ == "__main__":

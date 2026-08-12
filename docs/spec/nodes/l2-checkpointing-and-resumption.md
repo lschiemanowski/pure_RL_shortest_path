@@ -1,8 +1,8 @@
 # Checkpointing and resumption
 
 A checkpoint contains the current and reference-policy parameters, optimizer
-state, completed training step, curriculum position, interpolation and
-advancement state, resolved model configuration, and the random-generator
+state, completed training step, curriculum frontier and advancement state,
+resolved model configuration, and the random-generator
 states needed to continue the run. Periodic, curriculum-transition, and final
 checkpoints are distinguished by their purpose, and checkpoint replacement is
 atomic so that an interrupted write does not destroy the last usable state.

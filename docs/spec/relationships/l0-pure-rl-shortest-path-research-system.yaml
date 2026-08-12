@@ -2,7 +2,7 @@ id: 019feb83-80f6-786a-bf25-d637dd4a6af1
 description: docs/spec/nodes/l0-pure-rl-shortest-path-research-system.md
 level: L0
 scope: pure-rl-shortest-path/research-system
-realization: unimplemented
+realization: implemented
 anchors:
   - id: 019febad-236e-723c-8a9f-99e6915de543
     selector:

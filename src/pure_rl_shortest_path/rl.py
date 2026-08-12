@@ -88,6 +88,10 @@ def sample_policy_tokens(
     if logits.ndim != 2 or logits.shape[0] == 0 or logits.shape[1] == 0:
         raise ValueError("logits must have shape [positive_batch, positive_vocabulary]")
     probabilities = logits.float().softmax(dim=-1)
+    if generator is not None and probabilities.device.type != "cpu":
+        return torch.multinomial(
+            probabilities.cpu(), 1, generator=generator
+        ).squeeze(1).to(logits.device)
     return torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
 
 
@@ -116,61 +120,67 @@ def collect_grouped_completions(
             "maximum prompt and completion lengths exceed the model context limit"
         )
 
+    was_training = model.training
     model.eval()
     batch_size = config.generation_batch_size or len(expanded)
     sampled_completions: list[SampledCompletion] = []
     amp_enabled = autocast_dtype is not None
-    for batch_start in range(0, len(expanded), batch_size):
-        batch = expanded[batch_start : batch_start + batch_size]
-        prompt_length = max(len(example.prompt) for _, example in batch)
-        input_ids = torch.full(
-            (len(batch), prompt_length), PAD, dtype=torch.long, device=device
-        )
-        attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
-        for row, (_, example) in enumerate(batch):
-            length = len(example.prompt)
-            input_ids[row, -length:] = torch.tensor(example.prompt, device=device)
-            attention_mask[row, -length:] = True
+    try:
+        for batch_start in range(0, len(expanded), batch_size):
+            batch = expanded[batch_start : batch_start + batch_size]
+            prompt_length = max(len(example.prompt) for _, example in batch)
+            input_ids = torch.full(
+                (len(batch), prompt_length), PAD, dtype=torch.long, device=device
+            )
+            attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+            for row, (_, example) in enumerate(batch):
+                length = len(example.prompt)
+                input_ids[row, -length:] = torch.tensor(example.prompt, device=device)
+                attention_mask[row, -length:] = True
 
-        completions: list[list[int]] = [[] for _ in batch]
-        done = torch.zeros(len(batch), dtype=torch.bool, device=device)
-        current = input_ids
-        cache = None
-        for _ in range(config.max_new_tokens):
-            with torch.autocast(
-                device_type=device.type,
-                dtype=autocast_dtype,
-                enabled=amp_enabled,
-            ):
-                output = model(
-                    current,
-                    attention_mask=attention_mask,
-                    past_key_values=cache,
-                    use_cache=True,
+            completions: list[list[int]] = [[] for _ in batch]
+            done = torch.zeros(len(batch), dtype=torch.bool, device=device)
+            current = input_ids
+            cache = None
+            for _ in range(config.max_new_tokens):
+                with torch.autocast(
+                    device_type=device.type,
+                    dtype=autocast_dtype,
+                    enabled=amp_enabled,
+                ):
+                    output = model(
+                        current,
+                        attention_mask=attention_mask,
+                        past_key_values=cache,
+                        use_cache=True,
+                    )
+                sampled = sample_policy_tokens(output.logits[:, -1], generator)
+                sampled = torch.where(done, torch.full_like(sampled, PAD), sampled)
+                active_before_action = ~done
+                for row in active_before_action.nonzero(
+                    as_tuple=False
+                ).flatten().tolist():
+                    completions[row].append(int(sampled[row].item()))
+                done |= sampled.eq(EOS)
+                if bool(done.all()):
+                    break
+                current = sampled[:, None]
+                attention_mask = torch.cat(
+                    (attention_mask, active_before_action[:, None]), dim=1
                 )
-            sampled = sample_policy_tokens(output.logits[:, -1], generator)
-            sampled = torch.where(done, torch.full_like(sampled, PAD), sampled)
-            active_before_action = ~done
-            for row in active_before_action.nonzero(as_tuple=False).flatten().tolist():
-                completions[row].append(int(sampled[row].item()))
-            done |= sampled.eq(EOS)
-            if bool(done.all()):
-                break
-            current = sampled[:, None]
-            attention_mask = torch.cat(
-                (attention_mask, active_before_action[:, None]), dim=1
-            )
-            cache = output.past_key_values
+                cache = output.past_key_values
 
-        sampled_completions.extend(
-            SampledCompletion(
-                example=example,
-                completion=tuple(completion),
-                group_id=group_id,
-                terminated_by_eos=bool(completion and completion[-1] == EOS),
+            sampled_completions.extend(
+                SampledCompletion(
+                    example=example,
+                    completion=tuple(completion),
+                    group_id=group_id,
+                    terminated_by_eos=bool(completion and completion[-1] == EOS),
+                )
+                for (group_id, example), completion in zip(batch, completions)
             )
-            for (group_id, example), completion in zip(batch, completions)
-        )
+    finally:
+        model.train(was_training)
     return sampled_completions
 
 

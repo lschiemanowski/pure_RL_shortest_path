@@ -111,6 +111,9 @@ covers:
             command: Sequence[str] | None = None,
             started_at: datetime | None = None,
             run_id: str | None = None,
+            parent_run_id: str | None = None,
+            parent_checkpoint: str | None = None,
+            configuration_differences: Sequence[str] = (),
         ) -> InitializedRun:
             """Create a fresh, self-identifying run directory before model construction."""
   - path: src/pure_rl_shortest_path/run.py
@@ -175,6 +178,9 @@ covers:
                 requested_device=configuration.resolved.runtime.device,
                 device=resolved_device,
                 dtype=configuration.resolved.runtime.dtype,
+                parent_run_id=parent_run_id,
+                parent_checkpoint=parent_checkpoint,
+                configuration_differences=tuple(configuration_differences),
             )
 
             (directory / "experiment.toml").write_bytes(configuration.source_bytes)

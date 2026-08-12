@@ -1,0 +1,272 @@
+id: 019ff564-feee-7b48-82b4-6e3eb7fc1197
+description: docs/spec/nodes/l3-atomic-checkpoints-and-validated-resumption.md
+level: L3
+scope: pure-rl-shortest-path/experiment-protocol-and-evidence/checkpointing-and-resumption/atomic-checkpoints-and-validated-resumption
+realization: implemented
+parent: 019ff06a-a006-7bb5-9289-6b1bbf153896
+references:
+  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+    kind: contractual
+  - id: 019ff54c-87f7-7213-ab81-acb27e95126d
+    kind: contractual
+  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+    kind: contractual
+  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+    kind: contractual
+covers:
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        @dataclass
+        class NamedRandomStreams:
+            training_problems: random.Random
+            rollout_sampling: torch.Generator
+            curriculum_validation: random.Random
+            evaluation_sampling: torch.Generator
+
+            def state_dict(self) -> dict[str, object]:
+                return {
+                    "training_problems": self.training_problems.getstate(),
+                    "rollout_sampling": self.rollout_sampling.get_state(),
+                    "curriculum_validation": self.curriculum_validation.getstate(),
+                    "evaluation_sampling": self.evaluation_sampling.get_state(),
+                }
+
+            def load_state_dict(self, state: Mapping[str, object]) -> None:
+                self.training_problems.setstate(state["training_problems"])
+                self.rollout_sampling.set_state(state["rollout_sampling"])
+                self.curriculum_validation.setstate(state["curriculum_validation"])
+                self.evaluation_sampling.set_state(state["evaluation_sampling"])
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def _atomic_torch_save(value: object, path: Path) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                torch.save(value, temporary)
+                with temporary.open("rb+") as handle:
+                    os.fsync(handle.fileno())
+                os.replace(temporary, path)
+            finally:
+                if temporary.exists():
+                    temporary.unlink()
+
+
+        def _atomic_copy(source: Path, destination: Path) -> None:
+            temporary = destination.with_name(
+                f".{destination.name}.{uuid.uuid4().hex}.tmp"
+            )
+            try:
+                shutil.copyfile(source, temporary)
+                with temporary.open("rb+") as handle:
+                    os.fsync(handle.fileno())
+                os.replace(temporary, destination)
+            finally:
+                if temporary.exists():
+                    temporary.unlink()
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def save_training_checkpoint(
+            run_directory: Path,
+            *,
+            run_id: str,
+            purpose: CheckpointPurpose,
+            step: int,
+            curriculum_state: CurriculumState,
+            configuration: RunConfiguration,
+            policy: Transformer,
+            reference: Transformer,
+            optimizer: torch.optim.Optimizer,
+            random_streams: NamedRandomStreams,
+        ) -> Path:
+            """Atomically preserve all state needed for exact training continuation."""
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |2-
+            payload: dict[str, object] = {
+                "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                "created_at_utc": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "run_id": run_id,
+                "purpose": purpose,
+                "step": step,
+                "curriculum_state": asdict(curriculum_state),
+                "configuration": record,
+                "configuration_sha256": digest,
+                "policy": policy.state_dict(),
+                "reference": reference.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "random_streams": random_streams.state_dict(),
+                "torch_rng_state": torch.get_rng_state(),
+            }
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |2-
+            path = checkpoint_directory / filename
+            _atomic_torch_save(payload, path)
+            _atomic_copy(path, checkpoint_directory / "latest.pt")
+            return path
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def load_training_checkpoint(path: str | Path) -> LoadedCheckpoint:
+            checkpoint_path = Path(path).expanduser().resolve()
+            payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            if not isinstance(payload, dict):
+                raise ValueError("checkpoint payload must be a mapping")
+            if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+                raise ValueError("unsupported checkpoint schema version")
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def validate_resume_configuration(
+            checkpoint: LoadedCheckpoint,
+            requested: RunConfiguration,
+            *,
+            derived_run: bool,
+        ) -> tuple[str, ...]:
+            """Reject incompatible parameter semantics and identify permitted changes."""
+
+            if requested.vocabulary != checkpoint.configuration.vocabulary:
+                raise ValueError("requested task vocabulary is incompatible with checkpoint")
+            if requested.model != checkpoint.configuration.model:
+                raise ValueError("requested model architecture is incompatible with checkpoint")
+            if requested.master_seed != checkpoint.configuration.master_seed:
+                raise ValueError("requested master seed is incompatible with checkpoint")
+            if requested.curriculum.stages != checkpoint.configuration.curriculum.stages:
+                raise ValueError(
+                    "requested curriculum stages are incompatible with checkpoint"
+                )
+            differences = configuration_differences(checkpoint.configuration, requested)
+            if differences and not derived_run:
+                raise ValueError(
+                    "same-run resumption requires the recorded configuration; use a "
+                    "derived run for changed experimental settings"
+                )
+            return differences
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def restore_training_checkpoint(
+            checkpoint: LoadedCheckpoint,
+            *,
+            configuration: RunConfiguration,
+            derived_run: bool,
+            policy: Transformer,
+            reference: Transformer,
+            optimizer: torch.optim.Optimizer,
+            random_streams: NamedRandomStreams,
+        ) -> tuple[CurriculumState, tuple[str, ...]]:
+            differences = validate_resume_configuration(
+                checkpoint, configuration, derived_run=derived_run
+            )
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |2-
+            policy.load_state_dict(checkpoint.payload["policy"])
+            reference.load_state_dict(checkpoint.payload["reference"])
+            reference.eval()
+            for parameter in reference.parameters():
+                parameter.requires_grad_(False)
+            optimizer.load_state_dict(checkpoint.payload["optimizer"])
+            random_streams.load_state_dict(checkpoint.payload["random_streams"])
+            torch.set_rng_state(checkpoint.payload["torch_rng_state"])
+anchors:
+  - id: 019ff564-feee-74b1-a964-96e45d076a4a
+    selector:
+      quote: |-
+        Every checkpoint is a versioned record containing the current policy, frozen
+        reference policy, optimizer state, completed training step, curriculum frontier
+        and advancement streak, resolved configuration and digest, run identity, and
+        all named and framework random-generator states required to continue training.
+        It identifies whether it was created periodically, at a curriculum transition,
+        after interruption, or at normal completion.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff564-feee-74ac-85c2-32cbca458fca
+        selector:
+          quote: |2-
+                payload: dict[str, object] = {
+                    "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                    "created_at_utc": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    "run_id": run_id,
+                    "purpose": purpose,
+                    "step": step,
+                    "curriculum_state": asdict(curriculum_state),
+                    "configuration": record,
+                    "configuration_sha256": digest,
+                    "policy": policy.state_dict(),
+                    "reference": reference.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "random_streams": random_streams.state_dict(),
+                    "torch_rng_state": torch.get_rng_state(),
+                }
+  - id: 019ff564-feee-7a9f-84d7-63b532edad5a
+    selector:
+      quote: |-
+        A checkpoint is first written to a temporary sibling and then atomically
+        installed at its step- and purpose-specific path. The convenient latest path is
+        updated by a second atomic replacement, leaving the named checkpoint usable if
+        that update is interrupted.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff564-feee-7e98-8e70-6c7b98568d56
+        selector:
+          quote: |2-
+                path = checkpoint_directory / filename
+                _atomic_torch_save(payload, path)
+                _atomic_copy(path, checkpoint_directory / "latest.pt")
+                return path
+  - id: 019ff564-feee-7b57-9bfa-803ce161d9cf
+    selector:
+      quote: |-
+        Loading validates the checkpoint schema and configuration digest. Same-run
+        resumption requires the recorded configuration and originating source revision;
+        an operational stopping-step override is recorded separately. A derived run
+        may change future training settings, but it retains parent lineage and rejects
+        changes to the task vocabulary, model architecture, master seed, or ordered
+        curriculum stages.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff564-feee-72b5-ae79-80087075d028
+        selector:
+          quote: |2-
+                if requested.vocabulary != checkpoint.configuration.vocabulary:
+                    raise ValueError("requested task vocabulary is incompatible with checkpoint")
+                if requested.model != checkpoint.configuration.model:
+                    raise ValueError("requested model architecture is incompatible with checkpoint")
+                if requested.master_seed != checkpoint.configuration.master_seed:
+                    raise ValueError("requested master seed is incompatible with checkpoint")
+                if requested.curriculum.stages != checkpoint.configuration.curriculum.stages:
+                    raise ValueError(
+                        "requested curriculum stages are incompatible with checkpoint"
+                    )
+  - id: 019ff564-feee-7245-9eb9-fd279d0eec19
+    selector:
+      quote: |-
+        After validation, resumption restores the current and reference policies,
+        optimizer, curriculum state, named random streams, and applicable Torch device
+        random state before producing new experience. A changed optimizer configuration
+        in a derived run is applied explicitly after restoring its accumulated state.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff564-feee-723d-baab-2873330ad2ab
+        selector:
+          quote: |2-
+                policy.load_state_dict(checkpoint.payload["policy"])
+                reference.load_state_dict(checkpoint.payload["reference"])
+                reference.eval()
+                for parameter in reference.parameters():
+                    parameter.requires_grad_(False)
+                optimizer.load_state_dict(checkpoint.payload["optimizer"])
+                random_streams.load_state_dict(checkpoint.payload["random_streams"])
+                torch.set_rng_state(checkpoint.payload["torch_rng_state"])
