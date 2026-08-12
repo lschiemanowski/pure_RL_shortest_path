@@ -33,3 +33,16 @@ anchors:
     links:
       - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
         kind: informational
+  - id: 019ff5c5-0a59-7970-80c6-60241845f12b
+    selector:
+      quote: |-
+        Verification additionally distinguishes repeated legal directed transitions
+        that support further graph discovery from sterile repetitions. A repeated
+        transition is sterile only when no previously unseen undirected graph edge was
+        traversed since its preceding occurrence. It reports sterile-repetition rates
+        over all legal reasoning transitions and over the subset whose undirected edges
+        do not belong to the submitted valid answer. The latter uses the submitted
+        answer rather than oracle knowledge of which graph edges lie on a shortest path.
+    links:
+      - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+        kind: informational

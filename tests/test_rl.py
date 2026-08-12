@@ -144,6 +144,78 @@ class RewardTests(unittest.TestCase):
         self.assertAlmostEqual(longer.base_reward, 0.5 * 2 / 3)
         self.assertEqual(longer.reasoning_coverage, 1.0)
 
+    def test_sterile_repetition_mode_changes_only_the_selected_penalty(self) -> None:
+        repeated_answer_reasoning = (
+            self.shortest[0],
+            self.shortest[1],
+            self.shortest[0],
+            self.shortest[1],
+            self.shortest[2],
+        )
+        outcome = self.facts(
+            completion_for(
+                self.vocabulary,
+                repeated_answer_reasoning,
+                self.shortest,
+            )
+        )
+        assert outcome.reasoning is not None
+        self.assertAlmostEqual(
+            outcome.reasoning.sterile_repetition_rate_all, 1 / 4
+        )
+        self.assertEqual(
+            outcome.reasoning.sterile_repetition_rate_off_answer, 0.0
+        )
+
+        all_edges = reward_from_outcome(
+            outcome,
+            sterile_repetition_coefficient=0.2,
+            sterile_repetition_mode="all",
+        )
+        off_answer = reward_from_outcome(
+            outcome,
+            sterile_repetition_coefficient=0.2,
+            sterile_repetition_mode="off_answer",
+        )
+        self.assertAlmostEqual(all_edges.sterile_repetition_penalty, 0.05)
+        self.assertAlmostEqual(all_edges.total_reward, 0.95)
+        self.assertEqual(off_answer.sterile_repetition_penalty, 0.0)
+        self.assertEqual(off_answer.total_reward, 1.0)
+        self.assertEqual(
+            all_edges.sterile_repetition_rate_off_answer,
+            off_answer.sterile_repetition_rate_off_answer,
+        )
+
+    def test_invalid_answer_never_receives_repetition_penalty(self) -> None:
+        repeated_reasoning = (
+            self.shortest[0],
+            self.shortest[1],
+            self.shortest[0],
+            self.shortest[1],
+        )
+        outcome = self.facts(
+            completion_for(
+                self.vocabulary,
+                repeated_reasoning,
+                (self.example.source,),
+            )
+        )
+        reward = reward_from_outcome(
+            outcome,
+            sterile_repetition_coefficient=1.0,
+            sterile_repetition_mode="all",
+        )
+        self.assertGreater(reward.sterile_repetition_rate_all, 0.0)
+        self.assertEqual(reward.sterile_repetition_penalty, 0.0)
+        self.assertEqual(reward.total_reward, 0.05)
+
+    def test_reward_rejects_unknown_repetition_mode(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be all or off_answer"):
+            reward_from_outcome(
+                self.facts((EOS,)),
+                sterile_repetition_mode="oracle",  # type: ignore[arg-type]
+            )
+
 
 class AuxiliaryObjectiveTests(unittest.TestCase):
     def setUp(self) -> None:

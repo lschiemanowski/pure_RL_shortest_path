@@ -415,6 +415,11 @@ class ReasoningTraceFacts:
     reaches_target: bool
     answer_edge_coverage: float
     answer_edge_precision: float
+    sterile_repetitions_all: int
+    sterile_repetition_rate_all: float
+    off_answer_legal_transitions: int
+    sterile_repetitions_off_answer: int
+    sterile_repetition_rate_off_answer: float
 
 
 @dataclass(frozen=True)
@@ -441,12 +446,18 @@ def _shortest_labeled_distance(example: GraphExample) -> int:
 
 
 def _reasoning_trace_facts(
-    example: GraphExample, parsed: ParsedCompletion
+    example: GraphExample,
+    parsed: ParsedCompletion,
+    *,
+    valid_answer: bool,
 ) -> ReasoningTraceFacts:
     active = set(example.active_labels)
     current: int | None = example.source
     visited = {example.source}
     traversed: set[Edge] = set()
+    # For each directed transition, retain D_t at its preceding occurrence.
+    last_directed_discovery: dict[tuple[int, int], frozenset[Edge]] = {}
+    legal_trace: list[tuple[Edge, bool]] = []
     legal = 0
     illegal = 0
     restarts = 0
@@ -467,7 +478,16 @@ def _reasoning_trace_facts(
                 visited.add(node)
             if current is not None and node in example.adjacency[current]:
                 legal += 1
-                traversed.add(canonical_edge(current, node))
+                directed = (current, node)
+                edge = canonical_edge(current, node)
+                previous_discovery = last_directed_discovery.get(directed)
+                sterile = (
+                    previous_discovery is not None
+                    and previous_discovery == frozenset(traversed)
+                )
+                traversed.add(edge)
+                last_directed_discovery[directed] = frozenset(traversed)
+                legal_trace.append((edge, sterile))
             else:
                 illegal += 1
             current = node if node in active else None
@@ -478,6 +498,17 @@ def _reasoning_trace_facts(
     covered = len(answer_edges & traversed)
     coverage = covered / len(answer_edges) if answer_edges else 0.0
     precision = covered / len(traversed) if traversed else 0.0
+    sterile_all = sum(sterile for _, sterile in legal_trace)
+    repetition_rate_all = sterile_all / legal if legal else 0.0
+    excluded_edges = answer_edges if valid_answer else set()
+    off_answer_trace = [
+        sterile for edge, sterile in legal_trace if edge not in excluded_edges
+    ]
+    sterile_off_answer = sum(off_answer_trace)
+    off_answer_count = len(off_answer_trace)
+    repetition_rate_off_answer = (
+        sterile_off_answer / off_answer_count if off_answer_count else 0.0
+    )
     return ReasoningTraceFacts(
         legal_transitions=legal,
         illegal_transitions=illegal,
@@ -487,6 +518,11 @@ def _reasoning_trace_facts(
         reaches_target=example.target in visited,
         answer_edge_coverage=coverage,
         answer_edge_precision=precision,
+        sterile_repetitions_all=sterile_all,
+        sterile_repetition_rate_all=repetition_rate_all,
+        off_answer_legal_transitions=off_answer_count,
+        sterile_repetitions_off_answer=sterile_off_answer,
+        sterile_repetition_rate_off_answer=repetition_rate_off_answer,
     )
 
 
@@ -514,7 +550,7 @@ def verify_completion(
     answer_length = len(path) - 1
     shortest = valid_path and answer_length == shortest_distance
     excess_length = answer_length - shortest_distance if valid_path else None
-    reasoning = _reasoning_trace_facts(example, parsed)
+    reasoning = _reasoning_trace_facts(example, parsed, valid_answer=valid_path)
     return OutcomeFacts(
         parsed=parsed,
         valid_path=valid_path,

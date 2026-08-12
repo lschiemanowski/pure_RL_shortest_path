@@ -4,17 +4,26 @@ level: L3
 scope: pure-rl-shortest-path/task-environment/outcome-verification/deterministic-outcome-verification
 realization: implemented
 parent: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
+references:
+  - id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
+    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/task.py
     selector:
       quote: |-
         def _reasoning_trace_facts(
-            example: GraphExample, parsed: ParsedCompletion
+            example: GraphExample,
+            parsed: ParsedCompletion,
+            *,
+            valid_answer: bool,
         ) -> ReasoningTraceFacts:
             active = set(example.active_labels)
             current: int | None = example.source
             visited = {example.source}
             traversed: set[Edge] = set()
+            # For each directed transition, retain D_t at its preceding occurrence.
+            last_directed_discovery: dict[tuple[int, int], frozenset[Edge]] = {}
+            legal_trace: list[tuple[Edge, bool]] = []
             legal = 0
             illegal = 0
             restarts = 0
@@ -35,7 +44,16 @@ covers:
                         visited.add(node)
                     if current is not None and node in example.adjacency[current]:
                         legal += 1
-                        traversed.add(canonical_edge(current, node))
+                        directed = (current, node)
+                        edge = canonical_edge(current, node)
+                        previous_discovery = last_directed_discovery.get(directed)
+                        sterile = (
+                            previous_discovery is not None
+                            and previous_discovery == frozenset(traversed)
+                        )
+                        traversed.add(edge)
+                        last_directed_discovery[directed] = frozenset(traversed)
+                        legal_trace.append((edge, sterile))
                     else:
                         illegal += 1
                     current = node if node in active else None
@@ -46,6 +64,17 @@ covers:
             covered = len(answer_edges & traversed)
             coverage = covered / len(answer_edges) if answer_edges else 0.0
             precision = covered / len(traversed) if traversed else 0.0
+            sterile_all = sum(sterile for _, sterile in legal_trace)
+            repetition_rate_all = sterile_all / legal if legal else 0.0
+            excluded_edges = answer_edges if valid_answer else set()
+            off_answer_trace = [
+                sterile for edge, sterile in legal_trace if edge not in excluded_edges
+            ]
+            sterile_off_answer = sum(off_answer_trace)
+            off_answer_count = len(off_answer_trace)
+            repetition_rate_off_answer = (
+                sterile_off_answer / off_answer_count if off_answer_count else 0.0
+            )
             return ReasoningTraceFacts(
                 legal_transitions=legal,
                 illegal_transitions=illegal,
@@ -55,6 +84,11 @@ covers:
                 reaches_target=example.target in visited,
                 answer_edge_coverage=coverage,
                 answer_edge_precision=precision,
+                sterile_repetitions_all=sterile_all,
+                sterile_repetition_rate_all=repetition_rate_all,
+                off_answer_legal_transitions=off_answer_count,
+                sterile_repetitions_off_answer=sterile_off_answer,
+                sterile_repetition_rate_off_answer=repetition_rate_off_answer,
             )
   - path: src/pure_rl_shortest_path/task.py
     selector:
@@ -83,7 +117,7 @@ covers:
             answer_length = len(path) - 1
             shortest = valid_path and answer_length == shortest_distance
             excess_length = answer_length - shortest_distance if valid_path else None
-            reasoning = _reasoning_trace_facts(example, parsed)
+            reasoning = _reasoning_trace_facts(example, parsed, valid_answer=valid_path)
             return OutcomeFacts(
                 parsed=parsed,
                 valid_path=valid_path,
@@ -148,12 +182,18 @@ anchors:
         selector:
           quote: |-
             def _reasoning_trace_facts(
-                example: GraphExample, parsed: ParsedCompletion
+                example: GraphExample,
+                parsed: ParsedCompletion,
+                *,
+                valid_answer: bool,
             ) -> ReasoningTraceFacts:
                 active = set(example.active_labels)
                 current: int | None = example.source
                 visited = {example.source}
                 traversed: set[Edge] = set()
+                # For each directed transition, retain D_t at its preceding occurrence.
+                last_directed_discovery: dict[tuple[int, int], frozenset[Edge]] = {}
+                legal_trace: list[tuple[Edge, bool]] = []
                 legal = 0
                 illegal = 0
                 restarts = 0
@@ -174,7 +214,16 @@ anchors:
                             visited.add(node)
                         if current is not None and node in example.adjacency[current]:
                             legal += 1
-                            traversed.add(canonical_edge(current, node))
+                            directed = (current, node)
+                            edge = canonical_edge(current, node)
+                            previous_discovery = last_directed_discovery.get(directed)
+                            sterile = (
+                                previous_discovery is not None
+                                and previous_discovery == frozenset(traversed)
+                            )
+                            traversed.add(edge)
+                            last_directed_discovery[directed] = frozenset(traversed)
+                            legal_trace.append((edge, sterile))
                         else:
                             illegal += 1
                         current = node if node in active else None
@@ -185,6 +234,17 @@ anchors:
                 covered = len(answer_edges & traversed)
                 coverage = covered / len(answer_edges) if answer_edges else 0.0
                 precision = covered / len(traversed) if traversed else 0.0
+                sterile_all = sum(sterile for _, sterile in legal_trace)
+                repetition_rate_all = sterile_all / legal if legal else 0.0
+                excluded_edges = answer_edges if valid_answer else set()
+                off_answer_trace = [
+                    sterile for edge, sterile in legal_trace if edge not in excluded_edges
+                ]
+                sterile_off_answer = sum(off_answer_trace)
+                off_answer_count = len(off_answer_trace)
+                repetition_rate_off_answer = (
+                    sterile_off_answer / off_answer_count if off_answer_count else 0.0
+                )
                 return ReasoningTraceFacts(
                     legal_transitions=legal,
                     illegal_transitions=illegal,
@@ -194,6 +254,50 @@ anchors:
                     reaches_target=example.target in visited,
                     answer_edge_coverage=coverage,
                     answer_edge_precision=precision,
+                    sterile_repetitions_all=sterile_all,
+                    sterile_repetition_rate_all=repetition_rate_all,
+                    off_answer_legal_transitions=off_answer_count,
+                    sterile_repetitions_off_answer=sterile_off_answer,
+                    sterile_repetition_rate_off_answer=repetition_rate_off_answer,
+                )
+  - id: 019ff5c5-0a59-7d8d-a6d2-55e9538cde6b
+    selector:
+      quote: |-
+        Let \(e_1,\ldots,e_T\) be the ordered legal directed reasoning transitions,
+        excluding restarts and illegal moves. This sequence is global across all walks,
+        so a restart does not erase repetition history. Let \(D_t\) be the set of
+        distinct undirected graph edges traversed through position \(t\). If \(\tau(t)\)
+        is the preceding occurrence of the same directed transition, occurrence \(t\)
+        is sterile exactly when \(\tau(t)\) exists and
+
+        \[
+        D_{t-1}=D_{\tau(t)}.
+        \]
+
+        Thus a transition may be reused without being classified as sterile when the
+        interval since its preceding use discovered a new graph edge. The all-transition
+        rate is the number of sterile occurrences divided by \(T\), or zero when
+        \(T=0\). For the off-answer rate, verification removes from both numerator and
+        denominator transitions whose undirected edge belongs to the submitted valid
+        answer; if there is no valid answer, no edges are removed. An empty denominator
+        produces rate zero. Neither definition asks which edges belong to any
+        graph-theoretic shortest path.
+    links:
+      - path: src/pure_rl_shortest_path/task.py
+        kind: contractual
+        code_anchor: 019ff5f7-c5bc-73ab-948e-c38698522c60
+        selector:
+          quote: |2-
+                sterile_all = sum(sterile for _, sterile in legal_trace)
+                repetition_rate_all = sterile_all / legal if legal else 0.0
+                excluded_edges = answer_edges if valid_answer else set()
+                off_answer_trace = [
+                    sterile for edge, sterile in legal_trace if edge not in excluded_edges
+                ]
+                sterile_off_answer = sum(off_answer_trace)
+                off_answer_count = len(off_answer_trace)
+                repetition_rate_off_answer = (
+                    sterile_off_answer / off_answer_count if off_answer_count else 0.0
                 )
   - id: 019ff0e2-9b56-7a31-ad68-d733dc72789e
     selector:

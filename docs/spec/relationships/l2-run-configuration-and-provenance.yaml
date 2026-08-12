@@ -40,3 +40,13 @@ anchors:
         kind: informational
       - id: 019ff54c-87f7-7213-ab81-acb27e95126d
         kind: informational
+  - id: 019ff5c5-0a59-7e9d-a52e-c7e0306290d8
+    selector:
+      quote: |-
+        Sterile-repetition shaping is declared by an independently named nonnegative
+        coefficient and an explicit choice between all-transition and off-answer mode.
+        A zero coefficient disables its effect on reward without disabling either
+        diagnostic.
+    links:
+      - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+        kind: informational

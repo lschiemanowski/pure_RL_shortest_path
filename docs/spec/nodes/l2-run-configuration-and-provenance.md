@@ -11,3 +11,8 @@ a stable run identity. Independent random streams are used for training-problem
 generation and evaluation-problem generation. A resumed or derived run records
 its relationship to the originating run and checkpoint rather than presenting
 itself as an unrelated experiment.
+
+Sterile-repetition shaping is declared by an independently named nonnegative
+coefficient and an explicit choice between all-transition and off-answer mode.
+A zero coefficient disables its effect on reward without disabling either
+diagnostic.

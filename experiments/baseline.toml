@@ -23,6 +23,8 @@ top_p = 1.0
 
 [reward]
 coverage_coefficient = 0.0
+sterile_repetition_coefficient = 0.0
+sterile_repetition_mode = "off_answer"
 
 [optimization]
 learning_rate = 3e-4

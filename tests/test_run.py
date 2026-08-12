@@ -50,6 +50,8 @@ top_p = 1.0
 
 [reward]
 coverage_coefficient = 0.15
+sterile_repetition_coefficient = 0.0
+sterile_repetition_mode = "off_answer"
 
 [optimization]
 learning_rate = 3e-4
@@ -145,6 +147,12 @@ class RunConfigurationTests(unittest.TestCase):
             self.assertEqual(loaded.resolved.model.vocab_size, 22)
             self.assertEqual(loaded.resolved.model.n_layers, 2)
             self.assertEqual(loaded.resolved.rollout.temperature, 1.0)
+            self.assertEqual(
+                loaded.resolved.reward.sterile_repetition_mode, "off_answer"
+            )
+            self.assertEqual(
+                loaded.resolved.reward.sterile_repetition_coefficient, 0.0
+            )
             self.assertEqual(loaded.resolved.grpo.group_size, 4)
             self.assertEqual(loaded.resolved.grpo.valid_coefficient, 1.0)
             self.assertEqual(len(loaded.resolved.curriculum.stages), 2)
@@ -193,6 +201,22 @@ class RunConfigurationTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "completion budget"):
                 load_run_configuration(self.write_config(root, short_context))
+
+            invalid_mode = BASE_CONFIG.replace(
+                'sterile_repetition_mode = "off_answer"',
+                'sterile_repetition_mode = "oracle"',
+            )
+            with self.assertRaisesRegex(ValueError, "must be all or off_answer"):
+                load_run_configuration(self.write_config(root, invalid_mode))
+
+            negative_coefficient = BASE_CONFIG.replace(
+                "sterile_repetition_coefficient = 0.0",
+                "sterile_repetition_coefficient = -0.1",
+            )
+            with self.assertRaisesRegex(ValueError, "finite and nonnegative"):
+                load_run_configuration(
+                    self.write_config(root, negative_coefficient)
+                )
 
     def test_named_seed_derivation_is_stable_distinct_and_named(self) -> None:
         first = derive_named_seeds(17)
@@ -337,6 +361,7 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
 
             full = load_training_checkpoint(full_result.final_checkpoint)
             resumed = load_training_checkpoint(resumed_result.final_checkpoint)
+            self.assertEqual(full.payload["schema_version"], 2)
             self.assertEqual(full.step, 2)
             self.assertEqual(resumed.step, 2)
             self.assertEqual(full.curriculum_state, resumed.curriculum_state)
@@ -349,6 +374,9 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
                 for line in (split / "metrics.jsonl").read_text().splitlines()
             ]
             kinds = {record["kind"] for record in metrics}
+            self.assertTrue(
+                all(record["schema_version"] == 2 for record in metrics)
+            )
             self.assertIn("training", kinds)
             self.assertIn("evaluation", kinds)
             self.assertIn("curriculum_validation", kinds)
@@ -360,6 +388,18 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
             self.assertIn("prompt_tokens", representative)
             self.assertIn("parsed_and_verified", representative)
             self.assertIn("reward", representative)
+            self.assertIn(
+                "sterile_repetition_rate_all", representative["reward"]
+            )
+            training_record = next(
+                record for record in metrics if record["kind"] == "training"
+            )
+            self.assertIn(
+                "mean_sterile_repetition_rate_all", training_record
+            )
+            self.assertEqual(
+                training_record["sterile_repetition_mode"], "off_answer"
+            )
 
     def test_resume_compatibility_separates_hard_and_derived_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

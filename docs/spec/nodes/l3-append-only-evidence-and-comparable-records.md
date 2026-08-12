@@ -7,6 +7,11 @@ realized curriculum mixture, exact rollout outcome counts, separate base,
 coverage, and total rewards, separate policy, KL, and valid-next loss terms,
 their coefficients and denominators, and optimizer diagnostics.
 
+For sterile-repetition shaping, training and representative-completion evidence
+retains both the all-transition and off-answer rates, the selected mode and
+coefficient, and the resulting applied penalty. Both diagnostics remain present
+when the coefficient is zero or only one mode affects reward.
+
 Independent evaluation records retain the policy identity, graph-problem and
 problem-set identities, sampling protocol, and exact format, valid-path, and
 shortest-path counts and rates. Curriculum decisions and reference-policy

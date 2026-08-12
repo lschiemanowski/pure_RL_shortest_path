@@ -24,6 +24,35 @@ covers:
     selector:
       quote: |-
         @dataclass(frozen=True)
+        class RewardConfig:
+            coverage_coefficient: float = 0.0
+            sterile_repetition_coefficient: float = 0.0
+            sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer"
+
+            def __post_init__(self) -> None:
+                object.__setattr__(
+                    self,
+                    "coverage_coefficient",
+                    _nonnegative_real(
+                        self.coverage_coefficient, "reward.coverage_coefficient"
+                    ),
+                )
+                object.__setattr__(
+                    self,
+                    "sterile_repetition_coefficient",
+                    _nonnegative_real(
+                        self.sterile_repetition_coefficient,
+                        "reward.sterile_repetition_coefficient",
+                    ),
+                )
+                if self.sterile_repetition_mode not in ("all", "off_answer"):
+                    raise ConfigurationError(
+                        "reward.sterile_repetition_mode must be all or off_answer"
+                    )
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
         class RunConfiguration:
             """All scientific and operational settings after TOML resolution."""
 
@@ -112,6 +141,28 @@ covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
+            reward_data = _table(declaration, "reward")
+            _reject_unknown(
+                reward_data,
+                {
+                    "coverage_coefficient",
+                    "sterile_repetition_coefficient",
+                    "sterile_repetition_mode",
+                },
+                "reward",
+            )
+            reward = RewardConfig(
+                coverage_coefficient=reward_data.get("coverage_coefficient", 0.0),
+                sterile_repetition_coefficient=reward_data.get(
+                    "sterile_repetition_coefficient", 0.0
+                ),
+                sterile_repetition_mode=reward_data.get(
+                    "sterile_repetition_mode", "off_answer"
+                ),
+            )
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |2-
             return RunConfiguration(
                 schema_version=declaration["schema_version"],
                 name=declaration["name"],
@@ -185,6 +236,39 @@ anchors:
                         "runtime",
                     },
                     "root",
+                )
+  - id: 019ff5c5-0a59-71ac-8627-7415923ba6a7
+    selector:
+      quote: |-
+        The reward section independently declares `coverage_coefficient`,
+        `sterile_repetition_coefficient`, and `sterile_repetition_mode`, whose value is
+        either `"all"` or `"off_answer"`. Zero coefficients remain explicit resolved
+        values rather than removing the corresponding diagnostics from experiment
+        evidence.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff5f7-c5bd-73d0-91e2-ba99dfc6feb1
+        selector:
+          quote: |2-
+                reward_data = _table(declaration, "reward")
+                _reject_unknown(
+                    reward_data,
+                    {
+                        "coverage_coefficient",
+                        "sterile_repetition_coefficient",
+                        "sterile_repetition_mode",
+                    },
+                    "reward",
+                )
+                reward = RewardConfig(
+                    coverage_coefficient=reward_data.get("coverage_coefficient", 0.0),
+                    sterile_repetition_coefficient=reward_data.get(
+                        "sterile_repetition_coefficient", 0.0
+                    ),
+                    sterile_repetition_mode=reward_data.get(
+                        "sterile_repetition_mode", "off_answer"
+                    ),
                 )
   - id: 019ff54c-87f7-720c-9062-62c09a55bf81
     selector:

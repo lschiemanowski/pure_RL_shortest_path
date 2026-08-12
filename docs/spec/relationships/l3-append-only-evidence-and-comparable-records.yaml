@@ -109,10 +109,26 @@ covers:
                 "mean_reasoning_coverage": _mean(
                     [rollout.reward.reasoning_coverage for rollout in rollouts]
                 ),
+                "mean_sterile_repetition_rate_all": _mean(
+                    [rollout.reward.sterile_repetition_rate_all for rollout in rollouts]
+                ),
+                "mean_sterile_repetition_rate_off_answer": _mean(
+                    [
+                        rollout.reward.sterile_repetition_rate_off_answer
+                        for rollout in rollouts
+                    ]
+                ),
+                "mean_sterile_repetition_penalty": _mean(
+                    [rollout.reward.sterile_repetition_penalty for rollout in rollouts]
+                ),
                 "mean_total_reward": _mean(
                     [rollout.reward.total_reward for rollout in rollouts]
                 ),
                 "coverage_coefficient": configuration.reward.coverage_coefficient,
+                "sterile_repetition_coefficient": (
+                    configuration.reward.sterile_repetition_coefficient
+                ),
+                "sterile_repetition_mode": configuration.reward.sterile_repetition_mode,
                 "policy_loss": update.policy_loss,
                 "sampled_kl": update.sampled_kl,
                 "valid_next_loss": update.valid_loss,
@@ -205,6 +221,34 @@ anchors:
                 configuration: RunConfiguration,
             ) -> dict[str, object]:
                 count = len(rollouts)
+  - id: 019ff5c5-0a59-79cf-b700-8f337618ed45
+    selector:
+      quote: |-
+        For sterile-repetition shaping, training and representative-completion evidence
+        retains both the all-transition and off-answer rates, the selected mode and
+        coefficient, and the resulting applied penalty. Both diagnostics remain present
+        when the coefficient is zero or only one mode affects reward.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff5f7-c5bd-7fcd-95c7-fc703c63afc9
+        selector:
+          quote: '"mean_sterile_repetition_rate_all": _mean('
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff5f7-c5bd-7612-a4de-d7f2d50d85c3
+        selector:
+          quote: '"mean_sterile_repetition_rate_off_answer": _mean('
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff5f7-c5bd-7307-b7d9-671295a28e39
+        selector:
+          quote: '"mean_sterile_repetition_penalty": _mean('
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff5f7-c5bd-7ef5-a868-e844679cf21e
+        selector:
+          quote: '"sterile_repetition_mode": configuration.reward.sterile_repetition_mode,'
   - id: 019ff566-c44f-7597-9c52-dc3c295adf25
     selector:
       quote: |-

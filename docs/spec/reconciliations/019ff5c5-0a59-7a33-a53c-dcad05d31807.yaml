@@ -1,0 +1,106 @@
+decisions:
+  - abstraction_changed: true
+    node: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
+    outcome: revised
+    rationale: Implement deterministic all-transition and off-answer sterile-
+      repetition facts while preserving the verifier boundary against scalar reward.
+  - abstraction_changed: true
+    node: 019fef85-58fe-769d-b675-e1466eae3bff
+    outcome: revised
+    rationale: Implement an independently configurable sterile-repetition penalty in
+      scalar reward computation without changing the auxiliary objective.
+  - abstraction_changed: false
+    node: 019ff06a-a006-7d37-9c30-0fdce285ab2b
+    outcome: confirmed_unchanged
+    rationale: The existing evidence contract already requires every shaping term and
+      configured coefficient to remain separately auditable.
+  - abstraction_changed: true
+    node: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    outcome: revised
+    rationale: Compute sterile repetition from repeated legal directed transitions
+      that have no intervening discovery of a new undirected graph edge.
+  - abstraction_changed: true
+    node: 019ff1ac-85fb-7e19-9152-5a90b25959de
+    outcome: revised
+    rationale: Implement selectable all-transition and off-answer sterile-repetition
+      shaping, gated on final-answer validity and separate from coverage reward.
+  - abstraction_changed: true
+    node: 019ff566-c44f-7e89-9f82-0d916901384c
+    outcome: revised
+    rationale: Extend append-only evidence with both sterile-repetition rates, the
+      selected mode and coefficient, and the applied penalty.
+  - abstraction_changed: true
+    node: 019ff06a-a005-793f-92cd-fda20e6db21c
+    outcome: revised
+    rationale: Add named sterile-repetition coefficient and mode fields to the
+      resolved run configuration while retaining diagnostics when disabled.
+  - abstraction_changed: true
+    node: 019ff54c-87f7-704a-b05e-fb972cc40380
+    outcome: revised
+    rationale: Add explicit TOML reward fields for sterile-repetition coefficient and
+      mode without introducing command-line scientific overrides.
+  - abstraction_changed: false
+    node: 019feb9e-e54d-7450-bdf0-d2831a73da31
+    outcome: confirmed_unchanged
+    rationale: The existing experiment boundary already owns configurable learning
+      signals and their separately recorded evidence.
+  - abstraction_changed: false
+    node: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+    outcome: confirmed_unchanged
+    rationale: The trainer already requires reward shaping to be explicit and separate
+      from verifier facts and auxiliary objectives.
+  - abstraction_changed: false
+    node: 019feb9e-e54d-76f8-a696-ed88088bfaab
+    outcome: confirmed_unchanged
+    rationale: Sterile-repetition measurements remain deterministic trace facts and do
+      not move scalar reward into the task environment.
+  - abstraction_changed: false
+    node: 019ff06a-a006-7bb5-9289-6b1bbf153896
+    outcome: confirmed_unchanged
+    rationale: Checkpoints already retain the complete resolved configuration and need
+      no new checkpoint-specific state beyond the new declared fields.
+  - abstraction_changed: false
+    node: 019fef85-58fe-7cea-922e-23d922a1f3df
+    outcome: confirmed_unchanged
+    rationale: GRPO continues to normalize and optimize supplied scalar rollout rewards
+      without interpreting their component terms.
+  - abstraction_changed: false
+    node: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    outcome: confirmed_unchanged
+    rationale: Additional reasoning diagnostics do not change independent evaluation's
+      primary outcomes or prohibition on policy updates.
+  - abstraction_changed: false
+    node: 019ff564-feee-7b48-82b4-6e3eb7fc1197
+    outcome: confirmed_unchanged
+    rationale: Atomic checkpoint payloads already preserve the resolved reward
+      configuration as part of the whole-run continuation state.
+  - abstraction_changed: false
+    node: 019ff566-c44f-774b-ba4c-8b2dc0509fe6
+    outcome: revised
+    rationale: Thread the resolved sterile-repetition settings through rollout reward
+      computation while retaining TOML-only scientific configuration.
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-77ba-9d70-ff230d27971b
+    outcome: confirmed_unchanged
+    rationale: Batch construction continues to consume the already combined scalar
+      reward while component construction remains outside the GRPO update.
+  - abstraction_changed: false
+    node: 019ff503-40c8-728e-87ea-7504bd8e08bc
+    outcome: confirmed_unchanged
+    rationale: Policy evaluation still uses shared verification and preserves its exact
+      primary outcome aggregation as reasoning facts become richer.
+  - abstraction_changed: false
+    node: 019ff54c-87f7-7213-ab81-acb27e95126d
+    outcome: confirmed_unchanged
+    rationale: Existing configuration digests and provenance records automatically
+      identify the added resolved reward settings.
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-7b67-a90a-b3e0fa498cd8
+    outcome: confirmed_unchanged
+    rationale: The valid-next-token objective remains separately configured and is not
+      altered by the new scalar reward component.
+direction: spec-led
+id: 019ff5c5-0a59-7a33-a53c-dcad05d31807
+rationale: Specify and implement an auditable pressure against unproductive reasoning
+  repetition without treating ordinary path reuse as redundant or consulting oracle
+  shortest-path edge membership.

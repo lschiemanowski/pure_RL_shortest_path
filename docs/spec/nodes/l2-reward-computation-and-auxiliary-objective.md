@@ -14,15 +14,24 @@ r_{\mathrm{base}} =
 \end{cases}
 \]
 
-A configured reasoning-coverage bonus may be added:
+A configured reasoning-coverage bonus and sterile-repetition penalty may be
+added:
 
 \[
-r = r_{\mathrm{base}} + \lambda_{\mathrm{coverage}} c,
+r = r_{\mathrm{base}}
+  + \lambda_{\mathrm{coverage}} c
+  - \mathbf{1}_{\mathrm{valid}}
+    \lambda_{\mathrm{sterile}}\rho_m,
 \]
 
 where \(c\) is the fraction of edges in the final answer path that were also
-traversed in the reasoning trace. The base reward, coverage, coefficient, and
-total reward remain separately observable.
+traversed in the reasoning trace. The configured mode
+\(m\in\{\mathrm{all},\mathrm{off\mbox{-}answer}\}\) chooses either the
+sterile-repetition rate over all legal reasoning transitions or the rate after
+excluding transitions on undirected edges in the submitted valid answer. The
+penalty is zero for malformed and invalid answers, and its nonnegative
+coefficient may be zero. Both repetition rates, the selected mode, each shaping
+coefficient, and the total reward remain separately observable.
 
 The optional valid-next-token objective is separate from scalar rollout reward.
 At a sampled position \(t\), let \(V_t\) be the complete set of next tokens

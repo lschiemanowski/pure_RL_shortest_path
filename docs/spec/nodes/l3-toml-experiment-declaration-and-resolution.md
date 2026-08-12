@@ -7,6 +7,12 @@ objective, GRPO update, evaluation schedule, checkpoint schedule, runtime, and
 artifact location. Ordered values such as curriculum stages retain their
 declared order.
 
+The reward section independently declares `coverage_coefficient`,
+`sterile_repetition_coefficient`, and `sterile_repetition_mode`, whose value is
+either `"all"` or `"off_answer"`. Zero coefficients remain explicit resolved
+values rather than removing the corresponding diagnostics from experiment
+evidence.
+
 Loading converts the TOML data into the typed configurations used by the task,
 policy, trainer, curriculum, and evaluation implementations. Unknown keys,
 missing required values, invalid types, and mutually incompatible settings are

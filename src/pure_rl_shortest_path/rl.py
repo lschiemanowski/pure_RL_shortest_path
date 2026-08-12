@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from numbers import Real
-from typing import Sequence
+from typing import Literal, Sequence
 
 import torch
 from torch import nn
@@ -189,6 +189,11 @@ class RewardComponents:
     base_reward: float
     reasoning_coverage: float
     coverage_coefficient: float
+    sterile_repetition_rate_all: float
+    sterile_repetition_rate_off_answer: float
+    sterile_repetition_mode: Literal["all", "off_answer"]
+    sterile_repetition_coefficient: float
+    sterile_repetition_penalty: float
     total_reward: float
 
 
@@ -212,11 +217,19 @@ class Rollout:
 
 
 def reward_from_outcome(
-    outcome: OutcomeFacts, coverage_coefficient: float = 0.0
+    outcome: OutcomeFacts,
+    coverage_coefficient: float = 0.0,
+    sterile_repetition_coefficient: float = 0.0,
+    sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer",
 ) -> RewardComponents:
     """Convert verifier facts into explicit base, shaping, and total rewards."""
 
     coefficient = _nonnegative_real(coverage_coefficient, "coverage_coefficient")
+    sterile_coefficient = _nonnegative_real(
+        sterile_repetition_coefficient, "sterile_repetition_coefficient"
+    )
+    if sterile_repetition_mode not in ("all", "off_answer"):
+        raise ValueError("sterile_repetition_mode must be all or off_answer")
     if not outcome.format_ok:
         base_reward = 0.0
     elif not outcome.valid_path:
@@ -231,14 +244,44 @@ def reward_from_outcome(
         if outcome.valid_path and outcome.reasoning is not None
         else 0.0
     )
-    total = base_reward + coefficient * coverage
-    return RewardComponents(base_reward, coverage, coefficient, total)
+    repetition_all = (
+        outcome.reasoning.sterile_repetition_rate_all
+        if outcome.reasoning is not None
+        else 0.0
+    )
+    repetition_off_answer = (
+        outcome.reasoning.sterile_repetition_rate_off_answer
+        if outcome.reasoning is not None
+        else 0.0
+    )
+    selected_repetition = (
+        repetition_all
+        if sterile_repetition_mode == "all"
+        else repetition_off_answer
+    )
+    sterile_penalty = (
+        sterile_coefficient * selected_repetition if outcome.valid_path else 0.0
+    )
+    total = base_reward + coefficient * coverage - sterile_penalty
+    return RewardComponents(
+        base_reward=base_reward,
+        reasoning_coverage=coverage,
+        coverage_coefficient=coefficient,
+        sterile_repetition_rate_all=repetition_all,
+        sterile_repetition_rate_off_answer=repetition_off_answer,
+        sterile_repetition_mode=sterile_repetition_mode,
+        sterile_repetition_coefficient=sterile_coefficient,
+        sterile_repetition_penalty=sterile_penalty,
+        total_reward=total,
+    )
 
 
 def evaluate_samples(
     samples: Sequence[SampledCompletion],
     vocabulary: Vocabulary,
     coverage_coefficient: float = 0.0,
+    sterile_repetition_coefficient: float = 0.0,
+    sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer",
 ) -> list[Rollout]:
     """Verify sampled completions and attach their separately recorded rewards."""
 
@@ -249,7 +292,12 @@ def evaluate_samples(
             Rollout(
                 sample,
                 outcome,
-                reward_from_outcome(outcome, coverage_coefficient),
+                reward_from_outcome(
+                    outcome,
+                    coverage_coefficient,
+                    sterile_repetition_coefficient,
+                    sterile_repetition_mode,
+                ),
             )
         )
     return rollouts

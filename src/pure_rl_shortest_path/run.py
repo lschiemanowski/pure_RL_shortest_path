@@ -52,8 +52,8 @@ from .task import GraphProblemConfig, Vocabulary
 
 
 CONFIG_SCHEMA_VERSION = 1
-CHECKPOINT_SCHEMA_VERSION = 1
-EVIDENCE_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 2
+EVIDENCE_SCHEMA_VERSION = 2
 SEED_STREAM_NAMES = (
     "model_initialization",
     "training_problems",
@@ -128,6 +128,8 @@ def _reject_unknown(
 @dataclass(frozen=True)
 class RewardConfig:
     coverage_coefficient: float = 0.0
+    sterile_repetition_coefficient: float = 0.0
+    sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer"
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -137,6 +139,18 @@ class RewardConfig:
                 self.coverage_coefficient, "reward.coverage_coefficient"
             ),
         )
+        object.__setattr__(
+            self,
+            "sterile_repetition_coefficient",
+            _nonnegative_real(
+                self.sterile_repetition_coefficient,
+                "reward.sterile_repetition_coefficient",
+            ),
+        )
+        if self.sterile_repetition_mode not in ("all", "off_answer"):
+            raise ConfigurationError(
+                "reward.sterile_repetition_mode must be all or off_answer"
+            )
 
 
 @dataclass(frozen=True)
@@ -491,8 +505,24 @@ def resolve_run_configuration(
     )
 
     reward_data = _table(declaration, "reward")
-    _reject_unknown(reward_data, {"coverage_coefficient"}, "reward")
-    reward = RewardConfig(reward_data.get("coverage_coefficient", 0.0))
+    _reject_unknown(
+        reward_data,
+        {
+            "coverage_coefficient",
+            "sterile_repetition_coefficient",
+            "sterile_repetition_mode",
+        },
+        "reward",
+    )
+    reward = RewardConfig(
+        coverage_coefficient=reward_data.get("coverage_coefficient", 0.0),
+        sterile_repetition_coefficient=reward_data.get(
+            "sterile_repetition_coefficient", 0.0
+        ),
+        sterile_repetition_mode=reward_data.get(
+            "sterile_repetition_mode", "off_answer"
+        ),
+    )
 
     optimization = _table(declaration, "optimization")
     _reject_unknown(
@@ -1350,10 +1380,26 @@ def training_evidence_payload(
         "mean_reasoning_coverage": _mean(
             [rollout.reward.reasoning_coverage for rollout in rollouts]
         ),
+        "mean_sterile_repetition_rate_all": _mean(
+            [rollout.reward.sterile_repetition_rate_all for rollout in rollouts]
+        ),
+        "mean_sterile_repetition_rate_off_answer": _mean(
+            [
+                rollout.reward.sterile_repetition_rate_off_answer
+                for rollout in rollouts
+            ]
+        ),
+        "mean_sterile_repetition_penalty": _mean(
+            [rollout.reward.sterile_repetition_penalty for rollout in rollouts]
+        ),
         "mean_total_reward": _mean(
             [rollout.reward.total_reward for rollout in rollouts]
         ),
         "coverage_coefficient": configuration.reward.coverage_coefficient,
+        "sterile_repetition_coefficient": (
+            configuration.reward.sterile_repetition_coefficient
+        ),
+        "sterile_repetition_mode": configuration.reward.sterile_repetition_mode,
         "policy_loss": update.policy_loss,
         "sampled_kl": update.sampled_kl,
         "valid_next_loss": update.valid_loss,
@@ -1571,6 +1617,8 @@ def execute_training(
                 samples,
                 configuration.vocabulary,
                 configuration.reward.coverage_coefficient,
+                configuration.reward.sterile_repetition_coefficient,
+                configuration.reward.sterile_repetition_mode,
             )
             packed = pack_rollouts(
                 rollouts, configuration.vocabulary, device=device

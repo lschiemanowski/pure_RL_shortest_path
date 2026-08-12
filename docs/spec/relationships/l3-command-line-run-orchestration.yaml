@@ -55,6 +55,8 @@ covers:
                         samples,
                         configuration.vocabulary,
                         configuration.reward.coverage_coefficient,
+                        configuration.reward.sterile_repetition_coefficient,
+                        configuration.reward.sterile_repetition_mode,
                     )
                     packed = pack_rollouts(
                         rollouts, configuration.vocabulary, device=device
