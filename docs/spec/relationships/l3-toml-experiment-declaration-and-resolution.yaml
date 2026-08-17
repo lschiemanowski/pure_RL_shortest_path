@@ -22,6 +22,76 @@ references:
 covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
+      quote: from dataclasses import MISSING, asdict, dataclass, fields, is_dataclass, replace
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: from typing import Any, Literal, Mapping, Sequence, TypeVar
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        def _seed(value: object, name: str) -> int:
+            result = _plain_int(value, name)
+            if not 0 <= result < 2**63:
+                raise ConfigurationError(f"{name} must lie in [0, 2^63)")
+            return result
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |-
+        _MISSING = object()
+        _ConfigValue = TypeVar("_ConfigValue")
+
+
+        class _ConfigTable:
+            """Consume a TOML table once, then reject anything left unrecognized."""
+
+            def __init__(self, values: Mapping[str, Any], location: str) -> None:
+                self.values = dict(values)
+                self.location = location
+
+            def take(self, key: str, default: object = _MISSING) -> Any:
+                if key in self.values:
+                    return self.values.pop(key)
+                if default is _MISSING:
+                    name = key if self.location == "root" else f"{self.location}.{key}"
+                    raise ConfigurationError(f"missing required key: {name}")
+                return default
+
+            def table(self, key: str, *, required: bool = False) -> "_ConfigTable":
+                value = self.take(key, _MISSING if required else {})
+                if not isinstance(value, dict):
+                    raise ConfigurationError(f"{key} must be a TOML table")
+                return _ConfigTable(value, key)
+
+            def build(
+                self,
+                value_type: type[_ConfigValue],
+                *,
+                aliases: Mapping[str, str] | None = None,
+                defaults: Mapping[str, object] | None = None,
+                fixed: Mapping[str, object] | None = None,
+            ) -> _ConfigValue:
+                aliases, defaults = aliases or {}, defaults or {}
+                arguments = dict(fixed or {})
+                for field in fields(value_type):
+                    if field.name in arguments:
+                        continue
+                    key = aliases.get(field.name, field.name)
+                    if key in self.values:
+                        arguments[field.name] = self.take(key)
+                    elif field.name in defaults:
+                        arguments[field.name] = defaults[field.name]
+                    elif field.default is MISSING and field.default_factory is MISSING:
+                        arguments[field.name] = self.take(key)
+                return value_type(**arguments)
+
+            def finish(self) -> None:
+                if self.values:
+                    names = ", ".join(
+                        f"{self.location}.{key}" for key in sorted(self.values)
+                    )
+                    raise ConfigurationError(f"unknown configuration key(s): {names}")
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
       quote: |-
         @dataclass(frozen=True)
         class RewardConfig:
@@ -30,21 +100,9 @@ covers:
             sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer"
 
             def __post_init__(self) -> None:
-                object.__setattr__(
-                    self,
-                    "coverage_coefficient",
-                    _nonnegative_real(
-                        self.coverage_coefficient, "reward.coverage_coefficient"
-                    ),
-                )
-                object.__setattr__(
-                    self,
-                    "sterile_repetition_coefficient",
-                    _nonnegative_real(
-                        self.sterile_repetition_coefficient,
-                        "reward.sterile_repetition_coefficient",
-                    ),
-                )
+                for name in ("coverage_coefficient", "sterile_repetition_coefficient"):
+                    value = _nonnegative_real(getattr(self, name), f"reward.{name}")
+                    object.__setattr__(self, name, value)
                 if self.sterile_repetition_mode not in ("all", "off_answer"):
                     raise ConfigurationError(
                         "reward.sterile_repetition_mode must be all or off_answer"
@@ -79,9 +137,7 @@ covers:
                         f"{CONFIG_SCHEMA_VERSION}"
                     )
                 name = _nonempty_string(self.name, "name")
-                seed = _plain_int(self.master_seed, "seed")
-                if not 0 <= seed < 2**63:
-                    raise ConfigurationError("seed must lie in [0, 2^63)")
+                seed = _seed(self.master_seed, "seed")
                 largest_graph = max(stage.vertices for stage in self.curriculum.stages)
                 if self.vocabulary.node_label_count < largest_graph:
                     raise ConfigurationError(
@@ -116,57 +172,23 @@ covers:
         ) -> RunConfiguration:
             """Resolve a parsed TOML declaration into the project's typed contracts."""
 
-            _reject_unknown(
-                declaration,
-                {
-                    "schema_version",
-                    "name",
-                    "seed",
-                    "task",
-                    "model",
-                    "rollout",
-                    "reward",
-                    "optimization",
-                    "curriculum",
-                    "training",
-                    "evaluation",
-                    "artifacts",
-                    "runtime",
-                },
-                "root",
-            )
-            for key in ("schema_version", "name", "seed"):
-                if key not in declaration:
-                    raise ConfigurationError(f"missing required key: {key}")
+            root = _ConfigTable(declaration, "root")
+            schema_version = root.take("schema_version")
+            name = root.take("name")
+            seed = root.take("seed")
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
-            reward_data = _table(declaration, "reward")
-            _reject_unknown(
-                reward_data,
-                {
-                    "coverage_coefficient",
-                    "sterile_repetition_coefficient",
-                    "sterile_repetition_mode",
-                },
-                "reward",
-            )
-            reward = RewardConfig(
-                coverage_coefficient=reward_data.get("coverage_coefficient", 0.0),
-                sterile_repetition_coefficient=reward_data.get(
-                    "sterile_repetition_coefficient", 0.0
-                ),
-                sterile_repetition_mode=reward_data.get(
-                    "sterile_repetition_mode", "off_answer"
-                ),
-            )
+            reward_data = root.table("reward")
+            reward = reward_data.build(RewardConfig)
+            reward_data.finish()
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
             return RunConfiguration(
-                schema_version=declaration["schema_version"],
-                name=declaration["name"],
-                master_seed=declaration["seed"],
+                schema_version=schema_version,
+                name=name,
+                master_seed=seed,
                 vocabulary=vocabulary,
                 model=model,
                 rollout=rollout,
@@ -218,25 +240,10 @@ anchors:
         code_anchor: 019ff54c-87f7-716a-a961-0e04b6851ff1
         selector:
           quote: |2-
-                _reject_unknown(
-                    declaration,
-                    {
-                        "schema_version",
-                        "name",
-                        "seed",
-                        "task",
-                        "model",
-                        "rollout",
-                        "reward",
-                        "optimization",
-                        "curriculum",
-                        "training",
-                        "evaluation",
-                        "artifacts",
-                        "runtime",
-                    },
-                    "root",
-                )
+                root = _ConfigTable(declaration, "root")
+                schema_version = root.take("schema_version")
+                name = root.take("name")
+                seed = root.take("seed")
   - id: 019ff5c5-0a59-71ac-8627-7415923ba6a7
     selector:
       quote: |-
@@ -251,25 +258,9 @@ anchors:
         code_anchor: 019ff5f7-c5bd-73d0-91e2-ba99dfc6feb1
         selector:
           quote: |2-
-                reward_data = _table(declaration, "reward")
-                _reject_unknown(
-                    reward_data,
-                    {
-                        "coverage_coefficient",
-                        "sterile_repetition_coefficient",
-                        "sterile_repetition_mode",
-                    },
-                    "reward",
-                )
-                reward = RewardConfig(
-                    coverage_coefficient=reward_data.get("coverage_coefficient", 0.0),
-                    sterile_repetition_coefficient=reward_data.get(
-                        "sterile_repetition_coefficient", 0.0
-                    ),
-                    sterile_repetition_mode=reward_data.get(
-                        "sterile_repetition_mode", "off_answer"
-                    ),
-                )
+                reward_data = root.table("reward")
+                reward = reward_data.build(RewardConfig)
+                reward_data.finish()
   - id: 019ff54c-87f7-720c-9062-62c09a55bf81
     selector:
       quote: |-
@@ -285,9 +276,9 @@ anchors:
         selector:
           quote: |2-
                 return RunConfiguration(
-                    schema_version=declaration["schema_version"],
-                    name=declaration["name"],
-                    master_seed=declaration["seed"],
+                    schema_version=schema_version,
+                    name=name,
+                    master_seed=seed,
                     vocabulary=vocabulary,
                     model=model,
                     rollout=rollout,

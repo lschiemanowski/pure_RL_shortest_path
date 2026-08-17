@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from numbers import Real
 
@@ -43,26 +44,21 @@ class TransformerConfig:
     norm_eps: float = 1e-5
 
     def __post_init__(self) -> None:
-        vocab_size = _positive_int(self.vocab_size, "vocab_size")
-        context = _positive_int(self.max_context_length, "max_context_length")
-        model_width = _positive_int(self.d_model, "d_model")
-        layers = _positive_int(self.n_layers, "n_layers")
-        heads = _positive_int(self.n_heads, "n_heads")
-        mlp_width = _positive_int(self.mlp_dim, "mlp_dim")
-        rope_base = _positive_real(self.rope_base, "rope_base")
-        norm_eps = _positive_real(self.norm_eps, "norm_eps")
-        if model_width % heads:
+        for name in (
+            "vocab_size",
+            "max_context_length",
+            "d_model",
+            "n_layers",
+            "n_heads",
+            "mlp_dim",
+        ):
+            object.__setattr__(self, name, _positive_int(getattr(self, name), name))
+        for name in ("rope_base", "norm_eps"):
+            object.__setattr__(self, name, _positive_real(getattr(self, name), name))
+        if self.d_model % self.n_heads:
             raise ValueError("d_model must be divisible by n_heads")
-        if (model_width // heads) % 2:
+        if (self.d_model // self.n_heads) % 2:
             raise ValueError("attention head dimension must be even for rotary positions")
-        object.__setattr__(self, "vocab_size", vocab_size)
-        object.__setattr__(self, "max_context_length", context)
-        object.__setattr__(self, "d_model", model_width)
-        object.__setattr__(self, "n_layers", layers)
-        object.__setattr__(self, "n_heads", heads)
-        object.__setattr__(self, "mlp_dim", mlp_width)
-        object.__setattr__(self, "rope_base", rope_base)
-        object.__setattr__(self, "norm_eps", norm_eps)
 
 
 class RMSNorm(nn.Module):
@@ -253,6 +249,78 @@ class Transformer(nn.Module):
                 caches.append(cache)
         logits = self.lm_head(self.final_norm(hidden))
         return ModelOutput(logits, tuple(caches) if use_cache else None)
+
+
+@torch.no_grad()
+def generate_tokens(
+    model: Transformer,
+    prompts: Sequence[Sequence[int]],
+    *,
+    max_new_tokens: int,
+    batch_size: int | None,
+    pad_token: int,
+    eos_token: int,
+    device: torch.device,
+    select_next: Callable[[torch.Tensor], torch.Tensor],
+    autocast_dtype: torch.dtype | None = None,
+) -> tuple[tuple[int, ...], ...]:
+    """Generate unconstrained continuations with shared batching and KV caching."""
+
+    if not prompts:
+        return ()
+    maximum_prompt_length = max(len(prompt) for prompt in prompts)
+    if maximum_prompt_length + max_new_tokens > model.config.max_context_length:
+        raise ValueError("maximum prompt and completion exceed the model context limit")
+
+    was_training = model.training
+    model.eval()
+    size = batch_size or len(prompts)
+    generated: list[tuple[int, ...]] = []
+    try:
+        for start in range(0, len(prompts), size):
+            batch = prompts[start : start + size]
+            prompt_length = max(len(prompt) for prompt in batch)
+            input_ids = torch.full(
+                (len(batch), prompt_length), pad_token, dtype=torch.long, device=device
+            )
+            attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+            for row, prompt in enumerate(batch):
+                length = len(prompt)
+                input_ids[row, -length:] = torch.tensor(prompt, device=device)
+                attention_mask[row, -length:] = True
+
+            completions: list[list[int]] = [[] for _ in batch]
+            done = torch.zeros(len(batch), dtype=torch.bool, device=device)
+            current = input_ids
+            cache = None
+            for _ in range(max_new_tokens):
+                with torch.autocast(
+                    device_type=device.type,
+                    dtype=autocast_dtype,
+                    enabled=autocast_dtype is not None,
+                ):
+                    output = model(
+                        current,
+                        attention_mask=attention_mask,
+                        past_key_values=cache,
+                        use_cache=True,
+                    )
+                selected = select_next(output.logits[:, -1])
+                selected = torch.where(done, torch.full_like(selected, pad_token), selected)
+                active = ~done
+                for row in active.nonzero(as_tuple=False).flatten().tolist():
+                    completions[row].append(int(selected[row].item()))
+                done |= selected.eq(eos_token)
+                if bool(done.all()):
+                    break
+                current = selected[:, None]
+                attention_mask = torch.cat((attention_mask, active[:, None]), dim=1)
+                cache = output.past_key_values
+
+            generated.extend(map(tuple, completions))
+    finally:
+        model.train(was_training)
+    return tuple(generated)
 
 
 def count_parameters(model: nn.Module) -> int:

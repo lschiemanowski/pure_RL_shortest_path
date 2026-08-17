@@ -33,17 +33,6 @@ covers:
 
             if outcome.reasoning is None:
                 return SterileRepetitionFacts(0, 0, 0.0, 0, 0, 0.0)
-            discovered: set[tuple[int, int]] = set()
-            previous_discovery: dict[tuple[int, int], frozenset[tuple[int, int]]] = {}
-            classified: list[tuple[tuple[int, int], bool]] = []
-            for directed in outcome.reasoning.legal_directed_transitions:
-                edge = canonical_edge(*directed)
-                prior = previous_discovery.get(directed)
-                sterile = prior is not None and prior == frozenset(discovered)
-                discovered.add(edge)
-                previous_discovery[directed] = frozenset(discovered)
-                classified.append((edge, sterile))
-
             answer_edges = (
                 {
                     canonical_edge(u, v)
@@ -52,22 +41,27 @@ covers:
                 if outcome.valid_path
                 else set()
             )
-            off_answer = [
-                sterile for edge, sterile in classified if edge not in answer_edges
-            ]
-            sterile_all = sum(sterile for _, sterile in classified)
-            sterile_off_answer = sum(off_answer)
+            discovered: set[tuple[int, int]] = set()
+            previous_discovery: dict[tuple[int, int], frozenset[tuple[int, int]]] = {}
+            legal = sterile_all = off_answer = sterile_off_answer = 0
+            for directed in outcome.reasoning.legal_directed_transitions:
+                edge = canonical_edge(*directed)
+                prior = previous_discovery.get(directed)
+                sterile = prior is not None and prior == frozenset(discovered)
+                discovered.add(edge)
+                previous_discovery[directed] = frozenset(discovered)
+                legal += 1
+                sterile_all += sterile
+                if edge not in answer_edges:
+                    off_answer += 1
+                    sterile_off_answer += sterile
             return SterileRepetitionFacts(
-                legal_transitions=len(classified),
+                legal_transitions=legal,
                 sterile_repetitions_all=sterile_all,
-                repetition_rate_all=(
-                    sterile_all / len(classified) if classified else 0.0
-                ),
-                off_answer_legal_transitions=len(off_answer),
+                repetition_rate_all=sterile_all / legal if legal else 0.0,
+                off_answer_legal_transitions=off_answer,
                 sterile_repetitions_off_answer=sterile_off_answer,
-                repetition_rate_off_answer=(
-                    sterile_off_answer / len(off_answer) if off_answer else 0.0
-                ),
+                repetition_rate_off_answer=(sterile_off_answer / off_answer if off_answer else 0.0),
             )
   - path: src/pure_rl_shortest_path/rl.py
     selector:
@@ -139,7 +133,11 @@ anchors:
                     sterile = prior is not None and prior == frozenset(discovered)
                     discovered.add(edge)
                     previous_discovery[directed] = frozenset(discovered)
-                    classified.append((edge, sterile))
+                    legal += 1
+                    sterile_all += sterile
+                    if edge not in answer_edges:
+                        off_answer += 1
+                        sterile_off_answer += sterile
   - id: 019ff618-792a-7e04-b550-071c67397fba
     selector:
       quote: |-
@@ -164,9 +162,6 @@ anchors:
                     if outcome.valid_path
                     else set()
                 )
-                off_answer = [
-                    sterile for edge, sterile in classified if edge not in answer_edges
-                ]
   - id: 019ff618-792a-7976-99e7-a477c88df458
     selector:
       quote: |-

@@ -10,7 +10,7 @@ from typing import Literal, Sequence
 
 import torch
 
-from .model import Transformer
+from .model import Transformer, generate_tokens
 from .task import (
     EOS,
     PAD,
@@ -23,9 +23,14 @@ from .task import (
 )
 
 
-def _positive_int(value: object, name: str) -> int:
+def _plain_int(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an integer")
+    return value
+
+
+def _positive_int(value: object, name: str) -> int:
+    value = _plain_int(value, name)
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
@@ -74,11 +79,10 @@ class CurriculumConfig:
             raise ValueError("curriculum must contain at least one stage")
         if not all(isinstance(stage, GraphProblemConfig) for stage in stages):
             raise TypeError("every curriculum stage must be a GraphProblemConfig")
-        past = _positive_finite_real(self.past_decay_scale, "past_decay_scale")
-        future = _positive_finite_real(
-            self.future_decay_scale, "future_decay_scale"
-        )
-        if past <= future:
+        for name in ("past_decay_scale", "future_decay_scale"):
+            value = _positive_finite_real(getattr(self, name), name)
+            object.__setattr__(self, name, value)
+        if self.past_decay_scale <= self.future_decay_scale:
             raise ValueError(
                 "past_decay_scale must exceed future_decay_scale for an asymmetric tail"
             )
@@ -89,15 +93,13 @@ class CurriculumConfig:
             raise ValueError("advancement_threshold must not exceed one")
         patience = _positive_int(self.advancement_patience, "advancement_patience")
 
-        greatest_exponent = (len(stages) - 1) / future
+        greatest_exponent = (len(stages) - 1) / self.future_decay_scale
         if greatest_exponent > -math.log(math.nextafter(0.0, 1.0)):
             raise ValueError(
                 "future_decay_scale is too small to retain positive floating-point "
                 "probability for every stage"
             )
         object.__setattr__(self, "stages", stages)
-        object.__setattr__(self, "past_decay_scale", past)
-        object.__setattr__(self, "future_decay_scale", future)
         object.__setattr__(self, "advancement_threshold", threshold)
         object.__setattr__(self, "advancement_patience", patience)
 
@@ -108,16 +110,11 @@ class CurriculumState:
     advancement_streak: int = 0
 
     def validate_for(self, curriculum: CurriculumConfig) -> None:
-        if isinstance(self.frontier, bool) or not isinstance(self.frontier, int):
-            raise TypeError("frontier must be an integer")
-        if not 0 <= self.frontier < len(curriculum.stages):
+        frontier = _plain_int(self.frontier, "frontier")
+        if not 0 <= frontier < len(curriculum.stages):
             raise ValueError("frontier is outside the curriculum")
-        if (
-            isinstance(self.advancement_streak, bool)
-            or not isinstance(self.advancement_streak, int)
-        ):
-            raise TypeError("advancement_streak must be an integer")
-        if self.advancement_streak < 0:
+        streak = _plain_int(self.advancement_streak, "advancement_streak")
+        if streak < 0:
             raise ValueError("advancement_streak must be nonnegative")
 
 
@@ -195,13 +192,11 @@ class FrontierValidation:
 
     def __post_init__(self) -> None:
         step = _positive_int(self.training_step, "training_step")
-        frontier = self.frontier
-        if isinstance(frontier, bool) or not isinstance(frontier, int):
-            raise TypeError("frontier must be an integer")
+        frontier = _plain_int(self.frontier, "frontier")
         count = _positive_int(self.example_count, "example_count")
-        successes = self.shortest_path_successes
-        if isinstance(successes, bool) or not isinstance(successes, int):
-            raise TypeError("shortest_path_successes must be an integer")
+        successes = _plain_int(
+            self.shortest_path_successes, "shortest_path_successes"
+        )
         if not 0 <= successes <= count:
             raise ValueError("shortest_path_successes must lie within the denominator")
         object.__setattr__(self, "training_step", step)
@@ -264,13 +259,6 @@ def apply_frontier_validation(
         resulting_state=resulting_state,
         transition=transition,
     )
-
-
-def _plain_int(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{name} must be an integer")
-    return value
-
 
 @dataclass(frozen=True)
 class EvaluationProblemSet:
@@ -456,79 +444,27 @@ def generate_evaluation_completions(
         sampling_seed = _plain_int(sampling_seed, "sampling_seed")
         generator = torch.Generator().manual_seed(sampling_seed)
 
-    maximum_prompt_length = max(len(example.prompt) for example in problem_set.examples)
-    if (
-        maximum_prompt_length + sampling.max_new_tokens
-        > model.config.max_context_length
-    ):
-        raise ValueError(
-            "maximum prompt and evaluation completion exceed the model context limit"
+    generated = generate_tokens(
+        model,
+        [example.prompt for example in problem_set.examples],
+        max_new_tokens=sampling.max_new_tokens,
+        batch_size=sampling.batch_size,
+        pad_token=PAD,
+        eos_token=EOS,
+        device=device,
+        select_next=lambda logits: select_evaluation_tokens(
+            logits, sampling, generator
+        ),
+        autocast_dtype=autocast_dtype,
+    )
+    return tuple(
+        GeneratedEvaluationCompletion(
+            example=example,
+            completion=completion,
+            terminated_by_eos=bool(completion and completion[-1] == EOS),
         )
-
-    was_training = model.training
-    model.eval()
-    batch_size = sampling.batch_size or len(problem_set.examples)
-    generated: list[GeneratedEvaluationCompletion] = []
-    amp_enabled = autocast_dtype is not None
-    try:
-        for start in range(0, len(problem_set.examples), batch_size):
-            examples = problem_set.examples[start : start + batch_size]
-            prompt_length = max(len(example.prompt) for example in examples)
-            input_ids = torch.full(
-                (len(examples), prompt_length), PAD, dtype=torch.long, device=device
-            )
-            attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
-            for row, example in enumerate(examples):
-                length = len(example.prompt)
-                input_ids[row, -length:] = torch.tensor(example.prompt, device=device)
-                attention_mask[row, -length:] = True
-
-            completions: list[list[int]] = [[] for _ in examples]
-            done = torch.zeros(len(examples), dtype=torch.bool, device=device)
-            current = input_ids
-            cache = None
-            for _ in range(sampling.max_new_tokens):
-                with torch.autocast(
-                    device_type=device.type,
-                    dtype=autocast_dtype,
-                    enabled=amp_enabled,
-                ):
-                    output = model(
-                        current,
-                        attention_mask=attention_mask,
-                        past_key_values=cache,
-                        use_cache=True,
-                    )
-                selected = select_evaluation_tokens(
-                    output.logits[:, -1], sampling, generator
-                )
-                selected = torch.where(done, torch.full_like(selected, PAD), selected)
-                active_before_action = ~done
-                active_rows = (
-                    active_before_action.nonzero(as_tuple=False).flatten().tolist()
-                )
-                for row in active_rows:
-                    completions[row].append(int(selected[row].item()))
-                done |= selected.eq(EOS)
-                if bool(done.all()):
-                    break
-                current = selected[:, None]
-                attention_mask = torch.cat(
-                    (attention_mask, active_before_action[:, None]), dim=1
-                )
-                cache = output.past_key_values
-
-            generated.extend(
-                GeneratedEvaluationCompletion(
-                    example=example,
-                    completion=tuple(completion),
-                    terminated_by_eos=bool(completion and completion[-1] == EOS),
-                )
-                for example, completion in zip(examples, completions)
-            )
-    finally:
-        model.train(was_training)
-    return tuple(generated)
+        for example, completion in zip(problem_set.examples, generated)
+    )
 
 
 @dataclass(frozen=True)

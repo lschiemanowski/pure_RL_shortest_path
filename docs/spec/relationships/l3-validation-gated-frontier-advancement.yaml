@@ -22,13 +22,11 @@ covers:
 
             def __post_init__(self) -> None:
                 step = _positive_int(self.training_step, "training_step")
-                frontier = self.frontier
-                if isinstance(frontier, bool) or not isinstance(frontier, int):
-                    raise TypeError("frontier must be an integer")
+                frontier = _plain_int(self.frontier, "frontier")
                 count = _positive_int(self.example_count, "example_count")
-                successes = self.shortest_path_successes
-                if isinstance(successes, bool) or not isinstance(successes, int):
-                    raise TypeError("shortest_path_successes must be an integer")
+                successes = _plain_int(
+                    self.shortest_path_successes, "shortest_path_successes"
+                )
                 if not 0 <= successes <= count:
                     raise ValueError("shortest_path_successes must lie within the denominator")
                 object.__setattr__(self, "training_step", step)

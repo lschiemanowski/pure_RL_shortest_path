@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, is_dataclass, replace
+from dataclasses import MISSING, asdict, dataclass, fields, is_dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import tomllib
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence, TypeVar
 import uuid
 
 import torch
@@ -81,6 +81,13 @@ def _positive_int(value: object, name: str) -> int:
     return result
 
 
+def _seed(value: object, name: str) -> int:
+    result = _plain_int(value, name)
+    if not 0 <= result < 2**63:
+        raise ConfigurationError(f"{name} must lie in [0, 2^63)")
+    return result
+
+
 def _nonnegative_real(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise ConfigurationError(f"{name} must be a real number")
@@ -103,26 +110,59 @@ def _nonempty_string(value: object, name: str) -> str:
     return value.strip()
 
 
-def _table(
-    mapping: Mapping[str, Any], name: str, *, required: bool = False
-) -> dict[str, Any]:
-    if name not in mapping:
-        if required:
-            raise ConfigurationError(f"missing required table [{name}]")
-        return {}
-    value = mapping[name]
-    if not isinstance(value, dict):
-        raise ConfigurationError(f"{name} must be a TOML table")
-    return dict(value)
+_MISSING = object()
+_ConfigValue = TypeVar("_ConfigValue")
 
 
-def _reject_unknown(
-    mapping: Mapping[str, Any], allowed: set[str], location: str
-) -> None:
-    unknown = sorted(set(mapping) - allowed)
-    if unknown:
-        rendered = ", ".join(f"{location}.{key}" for key in unknown)
-        raise ConfigurationError(f"unknown configuration key(s): {rendered}")
+class _ConfigTable:
+    """Consume a TOML table once, then reject anything left unrecognized."""
+
+    def __init__(self, values: Mapping[str, Any], location: str) -> None:
+        self.values = dict(values)
+        self.location = location
+
+    def take(self, key: str, default: object = _MISSING) -> Any:
+        if key in self.values:
+            return self.values.pop(key)
+        if default is _MISSING:
+            name = key if self.location == "root" else f"{self.location}.{key}"
+            raise ConfigurationError(f"missing required key: {name}")
+        return default
+
+    def table(self, key: str, *, required: bool = False) -> "_ConfigTable":
+        value = self.take(key, _MISSING if required else {})
+        if not isinstance(value, dict):
+            raise ConfigurationError(f"{key} must be a TOML table")
+        return _ConfigTable(value, key)
+
+    def build(
+        self,
+        value_type: type[_ConfigValue],
+        *,
+        aliases: Mapping[str, str] | None = None,
+        defaults: Mapping[str, object] | None = None,
+        fixed: Mapping[str, object] | None = None,
+    ) -> _ConfigValue:
+        aliases, defaults = aliases or {}, defaults or {}
+        arguments = dict(fixed or {})
+        for field in fields(value_type):
+            if field.name in arguments:
+                continue
+            key = aliases.get(field.name, field.name)
+            if key in self.values:
+                arguments[field.name] = self.take(key)
+            elif field.name in defaults:
+                arguments[field.name] = defaults[field.name]
+            elif field.default is MISSING and field.default_factory is MISSING:
+                arguments[field.name] = self.take(key)
+        return value_type(**arguments)
+
+    def finish(self) -> None:
+        if self.values:
+            names = ", ".join(
+                f"{self.location}.{key}" for key in sorted(self.values)
+            )
+            raise ConfigurationError(f"unknown configuration key(s): {names}")
 
 
 @dataclass(frozen=True)
@@ -132,21 +172,9 @@ class RewardConfig:
     sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer"
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "coverage_coefficient",
-            _nonnegative_real(
-                self.coverage_coefficient, "reward.coverage_coefficient"
-            ),
-        )
-        object.__setattr__(
-            self,
-            "sterile_repetition_coefficient",
-            _nonnegative_real(
-                self.sterile_repetition_coefficient,
-                "reward.sterile_repetition_coefficient",
-            ),
-        )
+        for name in ("coverage_coefficient", "sterile_repetition_coefficient"):
+            value = _nonnegative_real(getattr(self, name), f"reward.{name}")
+            object.__setattr__(self, name, value)
         if self.sterile_repetition_mode not in ("all", "off_answer"):
             raise ConfigurationError(
                 "reward.sterile_repetition_mode must be all or off_answer"
@@ -161,20 +189,16 @@ class OptimizerConfig:
     beta2: float = 0.95
 
     def __post_init__(self) -> None:
-        learning_rate = _positive_real(
-            self.learning_rate, "optimization.learning_rate"
+        object.__setattr__(
+            self,
+            "learning_rate",
+            _positive_real(self.learning_rate, "optimization.learning_rate"),
         )
-        weight_decay = _nonnegative_real(
-            self.weight_decay, "optimization.weight_decay"
-        )
-        beta1 = _nonnegative_real(self.beta1, "optimization.beta1")
-        beta2 = _nonnegative_real(self.beta2, "optimization.beta2")
-        if beta1 >= 1.0 or beta2 >= 1.0:
+        for name in ("weight_decay", "beta1", "beta2"):
+            value = _nonnegative_real(getattr(self, name), f"optimization.{name}")
+            object.__setattr__(self, name, value)
+        if self.beta1 >= 1.0 or self.beta2 >= 1.0:
             raise ConfigurationError("optimization betas must be less than one")
-        object.__setattr__(self, "learning_rate", learning_rate)
-        object.__setattr__(self, "weight_decay", weight_decay)
-        object.__setattr__(self, "beta1", beta1)
-        object.__setattr__(self, "beta2", beta2)
 
 
 @dataclass(frozen=True)
@@ -184,21 +208,9 @@ class TrainingScheduleConfig:
     reference_update_every: int = 100
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "max_steps", _positive_int(self.max_steps, "training.max_steps")
-        )
-        object.__setattr__(
-            self,
-            "problems_per_step",
-            _positive_int(self.problems_per_step, "training.problems_per_step"),
-        )
-        object.__setattr__(
-            self,
-            "reference_update_every",
-            _positive_int(
-                self.reference_update_every, "training.reference_update_every"
-            ),
-        )
+        for name in ("max_steps", "problems_per_step", "reference_update_every"):
+            value = _positive_int(getattr(self, name), f"training.{name}")
+            object.__setattr__(self, name, value)
 
 
 @dataclass(frozen=True)
@@ -208,16 +220,9 @@ class EvaluationScheduleConfig:
     sampling: EvaluationSamplingConfig
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "every_steps",
-            _positive_int(self.every_steps, "evaluation.every_steps"),
-        )
-        object.__setattr__(
-            self,
-            "example_count",
-            _positive_int(self.example_count, "evaluation.example_count"),
-        )
+        for name in ("every_steps", "example_count"):
+            value = _positive_int(getattr(self, name), f"evaluation.{name}")
+            object.__setattr__(self, name, value)
         if not isinstance(self.sampling, EvaluationSamplingConfig):
             raise ConfigurationError(
                 "evaluation sampling must be an EvaluationSamplingConfig"
@@ -236,32 +241,15 @@ class ArtifactConfig:
     )
 
     def __post_init__(self) -> None:
-        output_root = Path(self.output_root)
-        object.__setattr__(self, "output_root", output_root)
-        object.__setattr__(
-            self, "log_every", _positive_int(self.log_every, "artifacts.log_every")
-        )
-        object.__setattr__(
-            self,
+        object.__setattr__(self, "output_root", Path(self.output_root))
+        for name in (
+            "log_every",
             "checkpoint_every",
-            _positive_int(
-                self.checkpoint_every, "artifacts.checkpoint_every"
-            ),
-        )
-        object.__setattr__(
-            self,
             "representative_every",
-            _positive_int(
-                self.representative_every, "artifacts.representative_every"
-            ),
-        )
-        object.__setattr__(
-            self,
             "representative_count",
-            _positive_int(
-                self.representative_count, "artifacts.representative_count"
-            ),
-        )
+        ):
+            value = _positive_int(getattr(self, name), f"artifacts.{name}")
+            object.__setattr__(self, name, value)
         if self.representative_selection != "first_completion_per_problem":
             raise ConfigurationError(
                 "artifacts.representative_selection must be "
@@ -324,9 +312,7 @@ class RunConfiguration:
                 f"{CONFIG_SCHEMA_VERSION}"
             )
         name = _nonempty_string(self.name, "name")
-        seed = _plain_int(self.master_seed, "seed")
-        if not 0 <= seed < 2**63:
-            raise ConfigurationError("seed must lie in [0, 2^63)")
+        seed = _seed(self.master_seed, "seed")
         largest_graph = max(stage.vertices for stage in self.curriculum.stages)
         if self.vocabulary.node_label_count < largest_graph:
             raise ConfigurationError(
@@ -399,30 +385,16 @@ def _canonical_json_bytes(value: object) -> bytes:
 def _graph_stage(value: object, index: int) -> GraphProblemConfig:
     if not isinstance(value, dict):
         raise ConfigurationError(f"curriculum.stages[{index}] must be a table")
-    _reject_unknown(
-        value,
-        {
-            "vertices",
-            "edges",
-            "min_distance",
-            "max_distance",
-            "generation_attempts",
-        },
-        f"curriculum.stages[{index}]",
+    stage = _ConfigTable(value, f"curriculum.stages[{index}]")
+    result = GraphProblemConfig(
+        vertices=stage.take("vertices"),
+        edges=stage.take("edges"),
+        min_distance=stage.take("min_distance"),
+        max_distance=stage.take("max_distance"),
+        generation_attempts=stage.take("generation_attempts", 100),
     )
-    required = ("vertices", "edges", "min_distance", "max_distance")
-    missing = [key for key in required if key not in value]
-    if missing:
-        raise ConfigurationError(
-            f"curriculum.stages[{index}] is missing: {', '.join(missing)}"
-        )
-    return GraphProblemConfig(
-        vertices=value["vertices"],
-        edges=value["edges"],
-        min_distance=value["min_distance"],
-        max_distance=value["max_distance"],
-        generation_attempts=value.get("generation_attempts", 100),
-    )
+    stage.finish()
+    return result
 
 
 def resolve_run_configuration(
@@ -430,148 +402,45 @@ def resolve_run_configuration(
 ) -> RunConfiguration:
     """Resolve a parsed TOML declaration into the project's typed contracts."""
 
-    _reject_unknown(
-        declaration,
-        {
-            "schema_version",
-            "name",
-            "seed",
-            "task",
-            "model",
-            "rollout",
-            "reward",
-            "optimization",
-            "curriculum",
-            "training",
-            "evaluation",
-            "artifacts",
-            "runtime",
-        },
-        "root",
-    )
-    for key in ("schema_version", "name", "seed"):
-        if key not in declaration:
-            raise ConfigurationError(f"missing required key: {key}")
+    root = _ConfigTable(declaration, "root")
+    schema_version = root.take("schema_version")
+    name = root.take("name")
+    seed = root.take("seed")
 
-    task = _table(declaration, "task", required=True)
-    _reject_unknown(task, {"node_label_count"}, "task")
-    if "node_label_count" not in task:
-        raise ConfigurationError("missing required key: task.node_label_count")
-    vocabulary = Vocabulary(task["node_label_count"])
+    task = root.table("task", required=True)
+    vocabulary = Vocabulary(task.take("node_label_count"))
+    task.finish()
 
-    model_data = _table(declaration, "model")
-    _reject_unknown(
-        model_data,
-        {
-            "max_context_length",
-            "d_model",
-            "layers",
-            "heads",
-            "mlp_dim",
-            "rope_base",
-            "norm_eps",
-        },
-        "model",
+    model_data = root.table("model")
+    model = model_data.build(
+        TransformerConfig,
+        aliases={"n_layers": "layers", "n_heads": "heads"},
+        fixed={"vocab_size": vocabulary.size},
     )
-    model = TransformerConfig(
-        vocab_size=vocabulary.size,
-        max_context_length=model_data.get("max_context_length", 768),
-        d_model=model_data.get("d_model", 256),
-        n_layers=model_data.get("layers", 6),
-        n_heads=model_data.get("heads", 8),
-        mlp_dim=model_data.get("mlp_dim", 768),
-        rope_base=model_data.get("rope_base", 10_000.0),
-        norm_eps=model_data.get("norm_eps", 1e-5),
-    )
+    model_data.finish()
 
-    rollout_data = _table(declaration, "rollout")
-    _reject_unknown(
-        rollout_data,
-        {
-            "group_size",
-            "max_new_tokens",
-            "generation_batch_size",
-            "temperature",
-            "top_p",
-        },
-        "rollout",
+    rollout_data = root.table("rollout")
+    rollout = rollout_data.build(
+        RolloutSamplingConfig,
+        defaults={"group_size": 8, "max_new_tokens": 96},
     )
-    rollout = RolloutSamplingConfig(
-        group_size=rollout_data.get("group_size", 8),
-        max_new_tokens=rollout_data.get("max_new_tokens", 96),
-        generation_batch_size=rollout_data.get("generation_batch_size"),
-        temperature=rollout_data.get("temperature", 1.0),
-        top_p=rollout_data.get("top_p", 1.0),
-    )
+    rollout_data.finish()
 
-    reward_data = _table(declaration, "reward")
-    _reject_unknown(
-        reward_data,
-        {
-            "coverage_coefficient",
-            "sterile_repetition_coefficient",
-            "sterile_repetition_mode",
-        },
-        "reward",
-    )
-    reward = RewardConfig(
-        coverage_coefficient=reward_data.get("coverage_coefficient", 0.0),
-        sterile_repetition_coefficient=reward_data.get(
-            "sterile_repetition_coefficient", 0.0
-        ),
-        sterile_repetition_mode=reward_data.get(
-            "sterile_repetition_mode", "off_answer"
-        ),
-    )
+    reward_data = root.table("reward")
+    reward = reward_data.build(RewardConfig)
+    reward_data.finish()
 
-    optimization = _table(declaration, "optimization")
-    _reject_unknown(
-        optimization,
-        {
-            "learning_rate",
-            "weight_decay",
-            "beta1",
-            "beta2",
-            "update_epochs",
-            "microbatch_size",
-            "clip_epsilon",
-            "kl_coefficient",
-            "valid_coefficient",
-            "gradient_clip",
-            "advantage_epsilon",
-        },
-        "optimization",
+    optimization = root.table("optimization")
+    optimizer = optimization.build(OptimizerConfig)
+    grpo = optimization.build(
+        GRPOConfig,
+        defaults={"update_epochs": 2, "kl_coefficient": 0.001},
+        fixed={"group_size": rollout.group_size},
     )
-    optimizer = OptimizerConfig(
-        learning_rate=optimization.get("learning_rate", 3e-4),
-        weight_decay=optimization.get("weight_decay", 0.01),
-        beta1=optimization.get("beta1", 0.9),
-        beta2=optimization.get("beta2", 0.95),
-    )
-    grpo = GRPOConfig(
-        group_size=rollout.group_size,
-        update_epochs=optimization.get("update_epochs", 2),
-        microbatch_size=optimization.get("microbatch_size", 8),
-        clip_epsilon=optimization.get("clip_epsilon", 0.2),
-        kl_coefficient=optimization.get("kl_coefficient", 0.001),
-        valid_coefficient=optimization.get("valid_coefficient", 0.0),
-        gradient_clip=optimization.get("gradient_clip", 1.0),
-        advantage_epsilon=optimization.get("advantage_epsilon", 1e-6),
-    )
+    optimization.finish()
 
-    curriculum_data = _table(declaration, "curriculum", required=True)
-    _reject_unknown(
-        curriculum_data,
-        {
-            "past_decay_scale",
-            "future_decay_scale",
-            "advancement_threshold",
-            "advancement_patience",
-            "stages",
-        },
-        "curriculum",
-    )
-    stages_data = curriculum_data.get("stages")
+    curriculum_data = root.table("curriculum", required=True)
+    stages_data = curriculum_data.take("stages")
     if not isinstance(stages_data, list) or not stages_data:
         raise ConfigurationError(
             "curriculum.stages must be a nonempty array of tables"
@@ -579,106 +448,45 @@ def resolve_run_configuration(
     stages = tuple(
         _graph_stage(stage, index) for index, stage in enumerate(stages_data)
     )
-    curriculum = CurriculumConfig(
-        stages=stages,
-        past_decay_scale=curriculum_data.get("past_decay_scale", 2.0),
-        future_decay_scale=curriculum_data.get("future_decay_scale", 0.25),
-        advancement_threshold=curriculum_data.get(
-            "advancement_threshold", 0.9
-        ),
-        advancement_patience=curriculum_data.get("advancement_patience", 3),
-    )
+    curriculum = curriculum_data.build(CurriculumConfig, fixed={"stages": stages})
+    curriculum_data.finish()
 
-    training_data = _table(declaration, "training")
-    _reject_unknown(
-        training_data,
-        {"max_steps", "problems_per_step", "reference_update_every"},
-        "training",
-    )
-    training = TrainingScheduleConfig(
-        max_steps=training_data.get("max_steps", 50_000),
-        problems_per_step=training_data.get("problems_per_step", 4),
-        reference_update_every=training_data.get("reference_update_every", 100),
-    )
+    training_data = root.table("training")
+    training = training_data.build(TrainingScheduleConfig)
+    training_data.finish()
 
-    evaluation_data = _table(declaration, "evaluation")
-    _reject_unknown(
-        evaluation_data,
-        {
-            "every_steps",
-            "example_count",
-            "max_new_tokens",
-            "batch_size",
-            "mode",
-            "temperature",
-            "top_p",
-        },
-        "evaluation",
+    evaluation_data = root.table("evaluation")
+    evaluation_sampling = evaluation_data.build(
+        EvaluationSamplingConfig,
+        defaults={"max_new_tokens": rollout.max_new_tokens},
     )
-    evaluation_sampling = EvaluationSamplingConfig(
-        max_new_tokens=evaluation_data.get(
-            "max_new_tokens", rollout.max_new_tokens
-        ),
-        batch_size=evaluation_data.get("batch_size"),
-        mode=evaluation_data.get("mode", "greedy"),
-        temperature=evaluation_data.get("temperature"),
-        top_p=evaluation_data.get("top_p"),
+    evaluation = evaluation_data.build(
+        EvaluationScheduleConfig,
+        defaults={"every_steps": 100, "example_count": 256},
+        fixed={"sampling": evaluation_sampling},
     )
-    evaluation = EvaluationScheduleConfig(
-        every_steps=evaluation_data.get("every_steps", 100),
-        example_count=evaluation_data.get("example_count", 256),
-        sampling=evaluation_sampling,
-    )
+    evaluation_data.finish()
 
-    artifacts_data = _table(declaration, "artifacts", required=True)
-    _reject_unknown(
-        artifacts_data,
-        {
-            "output_root",
-            "log_every",
-            "checkpoint_every",
-            "representative_every",
-            "representative_count",
-            "representative_selection",
-        },
-        "artifacts",
-    )
-    if "output_root" not in artifacts_data:
-        raise ConfigurationError("missing required key: artifacts.output_root")
+    artifacts_data = root.table("artifacts", required=True)
     output_text = _nonempty_string(
-        artifacts_data["output_root"], "artifacts.output_root"
+        artifacts_data.take("output_root"), "artifacts.output_root"
     )
     output_root = Path(output_text).expanduser()
     if not output_root.is_absolute():
         output_root = declaration_directory / output_root
     output_root = output_root.resolve()
-    artifacts = ArtifactConfig(
-        output_root=output_root,
-        log_every=artifacts_data.get("log_every", 10),
-        checkpoint_every=artifacts_data.get("checkpoint_every", 500),
-        representative_every=artifacts_data.get("representative_every", 100),
-        representative_count=artifacts_data.get("representative_count", 4),
-        representative_selection=artifacts_data.get(
-            "representative_selection", "first_completion_per_problem"
-        ),
-    )
+    artifacts = artifacts_data.build(ArtifactConfig, fixed={"output_root": output_root})
+    artifacts_data.finish()
 
-    runtime_data = _table(declaration, "runtime")
-    _reject_unknown(
-        runtime_data,
-        {"device", "dtype", "allow_dirty_source"},
-        "runtime",
-    )
-    runtime = RuntimeConfig(
-        device=runtime_data.get("device", "auto"),
-        dtype=runtime_data.get("dtype", "bfloat16"),
-        allow_dirty_source=runtime_data.get("allow_dirty_source", False),
-    )
+    runtime_data = root.table("runtime")
+    runtime = runtime_data.build(RuntimeConfig)
+    runtime_data.finish()
+    root.finish()
 
     return RunConfiguration(
-        schema_version=declaration["schema_version"],
-        name=declaration["name"],
-        master_seed=declaration["seed"],
+        schema_version=schema_version,
+        name=name,
+        master_seed=seed,
         vocabulary=vocabulary,
         model=model,
         rollout=rollout,
@@ -718,9 +526,7 @@ def load_run_configuration(path: str | Path) -> LoadedRunConfiguration:
 def derive_named_seeds(master_seed: int) -> dict[str, int]:
     """Derive stable, explicitly named random streams from one master seed."""
 
-    seed = _plain_int(master_seed, "seed")
-    if not 0 <= seed < 2**63:
-        raise ConfigurationError("seed must lie in [0, 2^63)")
+    seed = _seed(master_seed, "seed")
     result = {}
     for name in SEED_STREAM_NAMES:
         material = f"pure-rl-shortest-path:v1:{seed}:{name}".encode("ascii")
@@ -956,33 +762,20 @@ def run_configuration_from_record(record: Mapping[str, Any]) -> RunConfiguration
     reward = RewardConfig(**record["reward"])
     optimizer = OptimizerConfig(**record["optimizer"])
     grpo = GRPOConfig(**record["grpo"])
-    curriculum_data = record["curriculum"]
-    curriculum = CurriculumConfig(
-        stages=tuple(
-            GraphProblemConfig(**stage) for stage in curriculum_data["stages"]
-        ),
-        past_decay_scale=curriculum_data["past_decay_scale"],
-        future_decay_scale=curriculum_data["future_decay_scale"],
-        advancement_threshold=curriculum_data["advancement_threshold"],
-        advancement_patience=curriculum_data["advancement_patience"],
+    curriculum_data = dict(record["curriculum"])
+    curriculum_data["stages"] = tuple(
+        GraphProblemConfig(**stage) for stage in curriculum_data["stages"]
     )
+    curriculum = CurriculumConfig(**curriculum_data)
     training = TrainingScheduleConfig(**record["training"])
-    evaluation_data = record["evaluation"]
-    evaluation = EvaluationScheduleConfig(
-        every_steps=evaluation_data["every_steps"],
-        example_count=evaluation_data["example_count"],
-        sampling=EvaluationSamplingConfig(**evaluation_data["sampling"]),
+    evaluation_data = dict(record["evaluation"])
+    evaluation_data["sampling"] = EvaluationSamplingConfig(
+        **evaluation_data["sampling"]
     )
-    artifacts = ArtifactConfig(
-        output_root=Path(record["artifacts"]["output_root"]),
-        log_every=record["artifacts"]["log_every"],
-        checkpoint_every=record["artifacts"]["checkpoint_every"],
-        representative_every=record["artifacts"]["representative_every"],
-        representative_count=record["artifacts"]["representative_count"],
-        representative_selection=record["artifacts"][
-            "representative_selection"
-        ],
-    )
+    evaluation = EvaluationScheduleConfig(**evaluation_data)
+    artifacts_data = dict(record["artifacts"])
+    artifacts_data["output_root"] = Path(artifacts_data["output_root"])
+    artifacts = ArtifactConfig(**artifacts_data)
     runtime = RuntimeConfig(**record["runtime"])
     return RunConfiguration(
         schema_version=record["schema_version"],
@@ -1361,6 +1154,19 @@ def training_evidence_payload(
     configuration: RunConfiguration,
 ) -> dict[str, object]:
     count = len(rollouts)
+    mean_reward = {
+        f"mean_{name}": _mean(
+            [getattr(rollout.reward, name) for rollout in rollouts]
+        )
+        for name in (
+            "base_reward",
+            "reasoning_coverage",
+            "sterile_repetition_rate_all",
+            "sterile_repetition_rate_off_answer",
+            "sterile_repetition_penalty",
+            "total_reward",
+        )
+    }
     return {
         "frontier": batch.frontier,
         "problem_count": len(batch.examples),
@@ -1374,27 +1180,7 @@ def training_evidence_payload(
         "shortest_path_successes": sum(
             rollout.outcome.shortest for rollout in rollouts
         ),
-        "mean_base_reward": _mean(
-            [rollout.reward.base_reward for rollout in rollouts]
-        ),
-        "mean_reasoning_coverage": _mean(
-            [rollout.reward.reasoning_coverage for rollout in rollouts]
-        ),
-        "mean_sterile_repetition_rate_all": _mean(
-            [rollout.reward.sterile_repetition_rate_all for rollout in rollouts]
-        ),
-        "mean_sterile_repetition_rate_off_answer": _mean(
-            [
-                rollout.reward.sterile_repetition_rate_off_answer
-                for rollout in rollouts
-            ]
-        ),
-        "mean_sterile_repetition_penalty": _mean(
-            [rollout.reward.sterile_repetition_penalty for rollout in rollouts]
-        ),
-        "mean_total_reward": _mean(
-            [rollout.reward.total_reward for rollout in rollouts]
-        ),
+        **mean_reward,
         "coverage_coefficient": configuration.reward.coverage_coefficient,
         "sterile_repetition_coefficient": (
             configuration.reward.sterile_repetition_coefficient
@@ -1581,6 +1367,20 @@ def execute_training(
         },
     )
 
+    def save_checkpoint(purpose: CheckpointPurpose) -> Path:
+        return save_training_checkpoint(
+            Path(run_directory),
+            run_id=run_id,
+            purpose=purpose,
+            step=step,
+            curriculum_state=curriculum_state,
+            configuration=configuration,
+            policy=policy,
+            reference=reference,
+            optimizer=optimizer,
+            random_streams=streams,
+        )
+
     latest_checkpoint: Path | None = checkpoint.path if checkpoint else None
     interrupt_requested = False
     safe_to_checkpoint = True
@@ -1733,35 +1533,13 @@ def execute_training(
                 )
                 if decision.transition is not None:
                     transitioned = True
-                    latest_checkpoint = save_training_checkpoint(
-                        Path(run_directory),
-                        run_id=run_id,
-                        purpose="curriculum_transition",
-                        step=step,
-                        curriculum_state=curriculum_state,
-                        configuration=configuration,
-                        policy=policy,
-                        reference=reference,
-                        optimizer=optimizer,
-                        random_streams=streams,
-                    )
+                    latest_checkpoint = save_checkpoint("curriculum_transition")
 
             if (
                 step % configuration.artifacts.checkpoint_every == 0
                 and not transitioned
             ):
-                latest_checkpoint = save_training_checkpoint(
-                    Path(run_directory),
-                    run_id=run_id,
-                    purpose="periodic",
-                    step=step,
-                    curriculum_state=curriculum_state,
-                    configuration=configuration,
-                    policy=policy,
-                    reference=reference,
-                    optimizer=optimizer,
-                    random_streams=streams,
-                )
+                latest_checkpoint = save_checkpoint("periodic")
             safe_to_checkpoint = True
             if interrupt_requested:
                 raise KeyboardInterrupt
@@ -1777,18 +1555,7 @@ def execute_training(
                 },
             )
             raise
-        latest_checkpoint = save_training_checkpoint(
-            Path(run_directory),
-            run_id=run_id,
-            purpose="interruption",
-            step=step,
-            curriculum_state=curriculum_state,
-            configuration=configuration,
-            policy=policy,
-            reference=reference,
-            optimizer=optimizer,
-            random_streams=streams,
-        )
+        latest_checkpoint = save_checkpoint("interruption")
         writer.event(
             "run_interrupted", step, {"checkpoint": str(latest_checkpoint)}
         )
@@ -1797,18 +1564,7 @@ def execute_training(
         if previous_sigint is not None:
             signal.signal(signal.SIGINT, previous_sigint)
 
-    final_checkpoint = save_training_checkpoint(
-        Path(run_directory),
-        run_id=run_id,
-        purpose="final",
-        step=step,
-        curriculum_state=curriculum_state,
-        configuration=configuration,
-        policy=policy,
-        reference=reference,
-        optimizer=optimizer,
-        random_streams=streams,
-    )
+    final_checkpoint = save_checkpoint("final")
     writer.event(
         "run_completed", step, {"checkpoint": str(final_checkpoint)}
     )
@@ -1886,34 +1642,34 @@ def resume_training_run(
                 "max_steps_override": max_steps,
             },
         )
-        return execute_training(
-            run_directory=source_run_directory,
-            run_id=checkpoint.run_id,
-            configuration=checkpoint.configuration,
-            seeds=seeds,
-            checkpoint=checkpoint,
-            max_steps_override=max_steps,
+        run_directory = source_run_directory
+        run_id = checkpoint.run_id
+        configuration = checkpoint.configuration
+        derived_run = False
+    else:
+        requested = load_run_configuration(configuration_path)
+        differences = validate_resume_configuration(
+            checkpoint, requested.resolved, derived_run=True
         )
-
-    requested = load_run_configuration(configuration_path)
-    differences = validate_resume_configuration(
-        checkpoint, requested.resolved, derived_run=True
-    )
-    initialized = initialize_run(
-        requested,
-        source_repository=source_repository,
-        command=command,
-        parent_run_id=checkpoint.run_id,
-        parent_checkpoint=str(checkpoint.path),
-        configuration_differences=differences,
-    )
+        initialized = initialize_run(
+            requested,
+            source_repository=source_repository,
+            command=command,
+            parent_run_id=checkpoint.run_id,
+            parent_checkpoint=str(checkpoint.path),
+            configuration_differences=differences,
+        )
+        run_directory = initialized.directory
+        run_id = initialized.provenance.run_id
+        configuration = requested.resolved
+        derived_run = True
     return execute_training(
-        run_directory=initialized.directory,
-        run_id=initialized.provenance.run_id,
-        configuration=requested.resolved,
+        run_directory=run_directory,
+        run_id=run_id,
+        configuration=configuration,
         seeds=seeds,
         checkpoint=checkpoint,
-        derived_run=True,
+        derived_run=derived_run,
         max_steps_override=max_steps,
     )
 
@@ -1933,17 +1689,9 @@ class DeclaredEvaluationSet:
             "example_count",
             _positive_int(self.example_count, "set.example_count"),
         )
-        seed = _plain_int(self.generation_seed, "set.generation_seed")
-        if not 0 <= seed < 2**63:
-            raise ConfigurationError("set.generation_seed must lie in [0, 2^63)")
+        _seed(self.generation_seed, "set.generation_seed")
         if self.sampling_seed is not None:
-            sampling_seed = _plain_int(
-                self.sampling_seed, "set.sampling_seed"
-            )
-            if not 0 <= sampling_seed < 2**63:
-                raise ConfigurationError(
-                    "set.sampling_seed must lie in [0, 2^63)"
-                )
+            _seed(self.sampling_seed, "set.sampling_seed")
 
 
 @dataclass(frozen=True)
@@ -1985,90 +1733,50 @@ def load_standalone_evaluation_config(
         declaration = tomllib.loads(source_path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise ConfigurationError(f"invalid evaluation TOML: {error}") from error
-    _reject_unknown(
-        declaration,
-        {"schema_version", "name", "sampling", "sets", "artifacts", "runtime"},
-        "root",
-    )
-    sampling_data = _table(declaration, "sampling", required=True)
-    _reject_unknown(
-        sampling_data,
-        {"max_new_tokens", "batch_size", "mode", "temperature", "top_p"},
-        "sampling",
-    )
-    if "max_new_tokens" not in sampling_data:
-        raise ConfigurationError("missing required key: sampling.max_new_tokens")
-    sampling = EvaluationSamplingConfig(**sampling_data)
-    sets_data = declaration.get("sets")
+    root = _ConfigTable(declaration, "root")
+    schema_version = root.take("schema_version")
+    name = root.take("name")
+    sampling_data = root.table("sampling", required=True)
+    sampling = sampling_data.build(EvaluationSamplingConfig)
+    sampling_data.finish()
+    sets_data = root.take("sets")
     if not isinstance(sets_data, list):
         raise ConfigurationError("sets must be an array of tables")
     declared_sets = []
-    allowed_set_keys = {
-        "name",
-        "vertices",
-        "edges",
-        "min_distance",
-        "max_distance",
-        "generation_attempts",
-        "example_count",
-        "generation_seed",
-        "sampling_seed",
-    }
     for index, item in enumerate(sets_data):
         if not isinstance(item, dict):
             raise ConfigurationError(f"sets[{index}] must be a table")
-        _reject_unknown(item, allowed_set_keys, f"sets[{index}]")
-        required = {
-            "name",
-            "vertices",
-            "edges",
-            "min_distance",
-            "max_distance",
-            "example_count",
-            "generation_seed",
-        }
-        missing = sorted(required - set(item))
-        if missing:
-            raise ConfigurationError(
-                f"sets[{index}] is missing: {', '.join(missing)}"
-            )
+        set_data = _ConfigTable(item, f"sets[{index}]")
         declared_sets.append(
             DeclaredEvaluationSet(
-                name=item["name"],
+                name=set_data.take("name"),
                 problem_config=GraphProblemConfig(
-                    vertices=item["vertices"],
-                    edges=item["edges"],
-                    min_distance=item["min_distance"],
-                    max_distance=item["max_distance"],
-                    generation_attempts=item.get("generation_attempts", 100),
+                    vertices=set_data.take("vertices"),
+                    edges=set_data.take("edges"),
+                    min_distance=set_data.take("min_distance"),
+                    max_distance=set_data.take("max_distance"),
+                    generation_attempts=set_data.take("generation_attempts", 100),
                 ),
-                example_count=item["example_count"],
-                generation_seed=item["generation_seed"],
-                sampling_seed=item.get("sampling_seed"),
+                example_count=set_data.take("example_count"),
+                generation_seed=set_data.take("generation_seed"),
+                sampling_seed=set_data.take("sampling_seed", None),
             )
         )
-    artifacts = _table(declaration, "artifacts", required=True)
-    _reject_unknown(artifacts, {"output_root"}, "artifacts")
-    if "output_root" not in artifacts:
-        raise ConfigurationError("missing required key: artifacts.output_root")
+        set_data.finish()
+    artifacts = root.table("artifacts", required=True)
     output_root = Path(
-        _nonempty_string(artifacts["output_root"], "artifacts.output_root")
+        _nonempty_string(artifacts.take("output_root"), "artifacts.output_root")
     ).expanduser()
+    artifacts.finish()
     if not output_root.is_absolute():
         output_root = source_path.parent / output_root
-    runtime_data = _table(declaration, "runtime")
-    _reject_unknown(runtime_data, {"device", "dtype"}, "runtime")
-    runtime = RuntimeConfig(
-        device=runtime_data.get("device", "auto"),
-        dtype=runtime_data.get("dtype", "bfloat16"),
-        allow_dirty_source=False,
-    )
-    for key in ("schema_version", "name"):
-        if key not in declaration:
-            raise ConfigurationError(f"missing required key: {key}")
+    runtime_data = root.table("runtime")
+    runtime = runtime_data.build(RuntimeConfig, fixed={"allow_dirty_source": False})
+    runtime_data.finish()
+    root.finish()
     return StandaloneEvaluationConfig(
-        schema_version=declaration["schema_version"],
-        name=declaration["name"],
+        schema_version=schema_version,
+        name=name,
         sampling=sampling,
         sets=tuple(declared_sets),
         output_root=output_root.resolve(),

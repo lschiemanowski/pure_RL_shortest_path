@@ -36,6 +36,22 @@ covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
+            def save_checkpoint(purpose: CheckpointPurpose) -> Path:
+                return save_training_checkpoint(
+                    Path(run_directory),
+                    run_id=run_id,
+                    purpose=purpose,
+                    step=step,
+                    curriculum_state=curriculum_state,
+                    configuration=configuration,
+                    policy=policy,
+                    reference=reference,
+                    optimizer=optimizer,
+                    random_streams=streams,
+                )
+  - path: src/pure_rl_shortest_path/run.py
+    selector:
+      quote: |2-
                     batch = generate_training_problem_batch(
                         configuration.curriculum,
                         curriculum_state,
@@ -135,18 +151,7 @@ covers:
                         },
                     )
                     raise
-                latest_checkpoint = save_training_checkpoint(
-                    Path(run_directory),
-                    run_id=run_id,
-                    purpose="interruption",
-                    step=step,
-                    curriculum_state=curriculum_state,
-                    configuration=configuration,
-                    policy=policy,
-                    reference=reference,
-                    optimizer=optimizer,
-                    random_streams=streams,
-                )
+                latest_checkpoint = save_checkpoint("interruption")
                 writer.event(
                     "run_interrupted", step, {"checkpoint": str(latest_checkpoint)}
                 )
@@ -154,18 +159,7 @@ covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
-            final_checkpoint = save_training_checkpoint(
-                Path(run_directory),
-                run_id=run_id,
-                purpose="final",
-                step=step,
-                curriculum_state=curriculum_state,
-                configuration=configuration,
-                policy=policy,
-                reference=reference,
-                optimizer=optimizer,
-                random_streams=streams,
-            )
+            final_checkpoint = save_checkpoint("final")
             writer.event(
                 "run_completed", step, {"checkpoint": str(final_checkpoint)}
             )
@@ -303,18 +297,7 @@ anchors:
                             },
                         )
                         raise
-                    latest_checkpoint = save_training_checkpoint(
-                        Path(run_directory),
-                        run_id=run_id,
-                        purpose="interruption",
-                        step=step,
-                        curriculum_state=curriculum_state,
-                        configuration=configuration,
-                        policy=policy,
-                        reference=reference,
-                        optimizer=optimizer,
-                        random_streams=streams,
-                    )
+                    latest_checkpoint = save_checkpoint("interruption")
                     writer.event(
                         "run_interrupted", step, {"checkpoint": str(latest_checkpoint)}
                     )
@@ -324,18 +307,7 @@ anchors:
         code_anchor: 019ff564-feee-73b8-a81f-e9a51922b4a7
         selector:
           quote: |2-
-                final_checkpoint = save_training_checkpoint(
-                    Path(run_directory),
-                    run_id=run_id,
-                    purpose="final",
-                    step=step,
-                    curriculum_state=curriculum_state,
-                    configuration=configuration,
-                    policy=policy,
-                    reference=reference,
-                    optimizer=optimizer,
-                    random_streams=streams,
-                )
+                final_checkpoint = save_checkpoint("final")
                 writer.event(
                     "run_completed", step, {"checkpoint": str(final_checkpoint)}
                 )

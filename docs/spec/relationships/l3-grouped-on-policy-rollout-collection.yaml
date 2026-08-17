@@ -24,8 +24,8 @@ covers:
             top_p: float = 1.0
 
             def __post_init__(self) -> None:
-                group_size = _positive_int(self.group_size, "group_size")
-                max_new_tokens = _positive_int(self.max_new_tokens, "max_new_tokens")
+                for name in ("group_size", "max_new_tokens"):
+                    object.__setattr__(self, name, _positive_int(getattr(self, name), name))
                 batch_size = self.generation_batch_size
                 if batch_size is not None:
                     batch_size = _positive_int(batch_size, "generation_batch_size")
@@ -36,8 +36,6 @@ covers:
                         "training rollouts require temperature=1 and top_p=1 so samples "
                         "come from the policy distribution used by GRPO"
                     )
-                object.__setattr__(self, "group_size", group_size)
-                object.__setattr__(self, "max_new_tokens", max_new_tokens)
                 object.__setattr__(self, "generation_batch_size", batch_size)
                 object.__setattr__(self, "temperature", temperature)
                 object.__setattr__(self, "top_p", top_p)
@@ -55,6 +53,32 @@ covers:
             autocast_dtype: torch.dtype | None = None,
         ) -> list[SampledCompletion]:
             """Sample adjacent completion groups without task-specific token constraints."""
+
+            expanded = [
+                (group_id, example)
+                for group_id, example in enumerate(examples)
+                for _ in range(config.group_size)
+            ]
+            generated = generate_tokens(
+                model,
+                [example.prompt for _, example in expanded],
+                max_new_tokens=config.max_new_tokens,
+                batch_size=config.generation_batch_size,
+                pad_token=PAD,
+                eos_token=EOS,
+                device=device,
+                select_next=lambda logits: sample_policy_tokens(logits, generator),
+                autocast_dtype=autocast_dtype,
+            )
+            return [
+                SampledCompletion(
+                    example=example,
+                    completion=completion,
+                    group_id=group_id,
+                    terminated_by_eos=bool(completion and completion[-1] == EOS),
+                )
+                for (group_id, example), completion in zip(expanded, generated)
+            ]
   - path: src/pure_rl_shortest_path/rl.py
     selector:
       quote: |-
@@ -71,18 +95,82 @@ covers:
                     probabilities.cpu(), 1, generator=generator
                 ).squeeze(1).to(logits.device)
             return torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
-  - path: src/pure_rl_shortest_path/rl.py
+  - path: src/pure_rl_shortest_path/model.py
     selector:
-      quote: |2-
-                    sampled_completions.extend(
-                        SampledCompletion(
-                            example=example,
-                            completion=tuple(completion),
-                            group_id=group_id,
-                            terminated_by_eos=bool(completion and completion[-1] == EOS),
-                        )
-                        for (group_id, example), completion in zip(batch, completions)
+      quote: from collections.abc import Callable, Sequence
+  - path: src/pure_rl_shortest_path/model.py
+    selector:
+      quote: |-
+        @torch.no_grad()
+        def generate_tokens(
+            model: Transformer,
+            prompts: Sequence[Sequence[int]],
+            *,
+            max_new_tokens: int,
+            batch_size: int | None,
+            pad_token: int,
+            eos_token: int,
+            device: torch.device,
+            select_next: Callable[[torch.Tensor], torch.Tensor],
+            autocast_dtype: torch.dtype | None = None,
+        ) -> tuple[tuple[int, ...], ...]:
+            """Generate unconstrained continuations with shared batching and KV caching."""
+
+            if not prompts:
+                return ()
+            maximum_prompt_length = max(len(prompt) for prompt in prompts)
+            if maximum_prompt_length + max_new_tokens > model.config.max_context_length:
+                raise ValueError("maximum prompt and completion exceed the model context limit")
+
+            was_training = model.training
+            model.eval()
+            size = batch_size or len(prompts)
+            generated: list[tuple[int, ...]] = []
+            try:
+                for start in range(0, len(prompts), size):
+                    batch = prompts[start : start + size]
+                    prompt_length = max(len(prompt) for prompt in batch)
+                    input_ids = torch.full(
+                        (len(batch), prompt_length), pad_token, dtype=torch.long, device=device
                     )
+                    attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+                    for row, prompt in enumerate(batch):
+                        length = len(prompt)
+                        input_ids[row, -length:] = torch.tensor(prompt, device=device)
+                        attention_mask[row, -length:] = True
+
+                    completions: list[list[int]] = [[] for _ in batch]
+                    done = torch.zeros(len(batch), dtype=torch.bool, device=device)
+                    current = input_ids
+                    cache = None
+                    for _ in range(max_new_tokens):
+                        with torch.autocast(
+                            device_type=device.type,
+                            dtype=autocast_dtype,
+                            enabled=autocast_dtype is not None,
+                        ):
+                            output = model(
+                                current,
+                                attention_mask=attention_mask,
+                                past_key_values=cache,
+                                use_cache=True,
+                            )
+                        selected = select_next(output.logits[:, -1])
+                        selected = torch.where(done, torch.full_like(selected, pad_token), selected)
+                        active = ~done
+                        for row in active.nonzero(as_tuple=False).flatten().tolist():
+                            completions[row].append(int(selected[row].item()))
+                        done |= selected.eq(eos_token)
+                        if bool(done.all()):
+                            break
+                        current = selected[:, None]
+                        attention_mask = torch.cat((attention_mask, active[:, None]), dim=1)
+                        cache = output.past_key_values
+
+                    generated.extend(map(tuple, completions))
+            finally:
+                model.train(was_training)
+            return tuple(generated)
 anchors:
   - id: 019ff1b1-fc75-7690-9e65-2345ea4e15cc
     selector:
@@ -128,13 +216,9 @@ anchors:
         kind: contractual
         code_anchor: 019ff1ac-85fb-7515-b411-89dc830a00e8
         selector:
-          quote: |2-
-                        sampled_completions.extend(
-                            SampledCompletion(
-                                example=example,
-                                completion=tuple(completion),
-                                group_id=group_id,
-                                terminated_by_eos=bool(completion and completion[-1] == EOS),
-                            )
-                            for (group_id, example), completion in zip(batch, completions)
-                        )
+          quote: terminated_by_eos=bool(completion and completion[-1] == EOS),
+      - path: src/pure_rl_shortest_path/model.py
+        kind: contractual
+        code_anchor: 019ff6c7-c15e-7781-929f-931b38aa1ada
+        selector:
+          quote: done |= selected.eq(eos_token)

@@ -25,9 +25,7 @@ covers:
         def derive_named_seeds(master_seed: int) -> dict[str, int]:
             """Derive stable, explicitly named random streams from one master seed."""
 
-            seed = _plain_int(master_seed, "seed")
-            if not 0 <= seed < 2**63:
-                raise ConfigurationError("seed must lie in [0, 2^63)")
+            seed = _seed(master_seed, "seed")
             result = {}
             for name in SEED_STREAM_NAMES:
                 material = f"pure-rl-shortest-path:v1:{seed}:{name}".encode("ascii")

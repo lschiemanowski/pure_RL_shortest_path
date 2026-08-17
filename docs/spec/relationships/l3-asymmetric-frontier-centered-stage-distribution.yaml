@@ -16,8 +16,7 @@ covers:
     selector:
       quote: |-
         def _positive_int(value: object, name: str) -> int:
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise TypeError(f"{name} must be an integer")
+            value = _plain_int(value, name)
             if value <= 0:
                 raise ValueError(f"{name} must be positive")
             return value
@@ -68,11 +67,10 @@ covers:
                     raise ValueError("curriculum must contain at least one stage")
                 if not all(isinstance(stage, GraphProblemConfig) for stage in stages):
                     raise TypeError("every curriculum stage must be a GraphProblemConfig")
-                past = _positive_finite_real(self.past_decay_scale, "past_decay_scale")
-                future = _positive_finite_real(
-                    self.future_decay_scale, "future_decay_scale"
-                )
-                if past <= future:
+                for name in ("past_decay_scale", "future_decay_scale"):
+                    value = _positive_finite_real(getattr(self, name), name)
+                    object.__setattr__(self, name, value)
+                if self.past_decay_scale <= self.future_decay_scale:
                     raise ValueError(
                         "past_decay_scale must exceed future_decay_scale for an asymmetric tail"
                     )
@@ -83,15 +81,13 @@ covers:
                     raise ValueError("advancement_threshold must not exceed one")
                 patience = _positive_int(self.advancement_patience, "advancement_patience")
 
-                greatest_exponent = (len(stages) - 1) / future
+                greatest_exponent = (len(stages) - 1) / self.future_decay_scale
                 if greatest_exponent > -math.log(math.nextafter(0.0, 1.0)):
                     raise ValueError(
                         "future_decay_scale is too small to retain positive floating-point "
                         "probability for every stage"
                     )
                 object.__setattr__(self, "stages", stages)
-                object.__setattr__(self, "past_decay_scale", past)
-                object.__setattr__(self, "future_decay_scale", future)
                 object.__setattr__(self, "advancement_threshold", threshold)
                 object.__setattr__(self, "advancement_patience", patience)
   - path: src/pure_rl_shortest_path/experiment.py
@@ -103,16 +99,11 @@ covers:
             advancement_streak: int = 0
 
             def validate_for(self, curriculum: CurriculumConfig) -> None:
-                if isinstance(self.frontier, bool) or not isinstance(self.frontier, int):
-                    raise TypeError("frontier must be an integer")
-                if not 0 <= self.frontier < len(curriculum.stages):
+                frontier = _plain_int(self.frontier, "frontier")
+                if not 0 <= frontier < len(curriculum.stages):
                     raise ValueError("frontier is outside the curriculum")
-                if (
-                    isinstance(self.advancement_streak, bool)
-                    or not isinstance(self.advancement_streak, int)
-                ):
-                    raise TypeError("advancement_streak must be an integer")
-                if self.advancement_streak < 0:
+                streak = _plain_int(self.advancement_streak, "advancement_streak")
+                if streak < 0:
                     raise ValueError("advancement_streak must be nonnegative")
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
@@ -233,7 +224,7 @@ anchors:
         code_anchor: 019ff4ba-9ea8-7d49-8374-5490ec392c99
         selector:
           quote: |2-
-                    if past <= future:
+                    if self.past_decay_scale <= self.future_decay_scale:
                         raise ValueError(
                             "past_decay_scale must exceed future_decay_scale for an asymmetric tail"
                         )

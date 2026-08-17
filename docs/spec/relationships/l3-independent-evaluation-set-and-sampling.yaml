@@ -11,6 +11,8 @@ references:
     kind: contractual
   - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
     kind: contractual
+  - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
+    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
@@ -212,79 +214,27 @@ covers:
                 sampling_seed = _plain_int(sampling_seed, "sampling_seed")
                 generator = torch.Generator().manual_seed(sampling_seed)
 
-            maximum_prompt_length = max(len(example.prompt) for example in problem_set.examples)
-            if (
-                maximum_prompt_length + sampling.max_new_tokens
-                > model.config.max_context_length
-            ):
-                raise ValueError(
-                    "maximum prompt and evaluation completion exceed the model context limit"
+            generated = generate_tokens(
+                model,
+                [example.prompt for example in problem_set.examples],
+                max_new_tokens=sampling.max_new_tokens,
+                batch_size=sampling.batch_size,
+                pad_token=PAD,
+                eos_token=EOS,
+                device=device,
+                select_next=lambda logits: select_evaluation_tokens(
+                    logits, sampling, generator
+                ),
+                autocast_dtype=autocast_dtype,
+            )
+            return tuple(
+                GeneratedEvaluationCompletion(
+                    example=example,
+                    completion=completion,
+                    terminated_by_eos=bool(completion and completion[-1] == EOS),
                 )
-
-            was_training = model.training
-            model.eval()
-            batch_size = sampling.batch_size or len(problem_set.examples)
-            generated: list[GeneratedEvaluationCompletion] = []
-            amp_enabled = autocast_dtype is not None
-            try:
-                for start in range(0, len(problem_set.examples), batch_size):
-                    examples = problem_set.examples[start : start + batch_size]
-                    prompt_length = max(len(example.prompt) for example in examples)
-                    input_ids = torch.full(
-                        (len(examples), prompt_length), PAD, dtype=torch.long, device=device
-                    )
-                    attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
-                    for row, example in enumerate(examples):
-                        length = len(example.prompt)
-                        input_ids[row, -length:] = torch.tensor(example.prompt, device=device)
-                        attention_mask[row, -length:] = True
-
-                    completions: list[list[int]] = [[] for _ in examples]
-                    done = torch.zeros(len(examples), dtype=torch.bool, device=device)
-                    current = input_ids
-                    cache = None
-                    for _ in range(sampling.max_new_tokens):
-                        with torch.autocast(
-                            device_type=device.type,
-                            dtype=autocast_dtype,
-                            enabled=amp_enabled,
-                        ):
-                            output = model(
-                                current,
-                                attention_mask=attention_mask,
-                                past_key_values=cache,
-                                use_cache=True,
-                            )
-                        selected = select_evaluation_tokens(
-                            output.logits[:, -1], sampling, generator
-                        )
-                        selected = torch.where(done, torch.full_like(selected, PAD), selected)
-                        active_before_action = ~done
-                        active_rows = (
-                            active_before_action.nonzero(as_tuple=False).flatten().tolist()
-                        )
-                        for row in active_rows:
-                            completions[row].append(int(selected[row].item()))
-                        done |= selected.eq(EOS)
-                        if bool(done.all()):
-                            break
-                        current = selected[:, None]
-                        attention_mask = torch.cat(
-                            (attention_mask, active_before_action[:, None]), dim=1
-                        )
-                        cache = output.past_key_values
-
-                    generated.extend(
-                        GeneratedEvaluationCompletion(
-                            example=example,
-                            completion=tuple(completion),
-                            terminated_by_eos=bool(completion and completion[-1] == EOS),
-                        )
-                        for example, completion in zip(examples, completions)
-                    )
-            finally:
-                model.train(was_training)
-            return tuple(generated)
+                for example, completion in zip(problem_set.examples, generated)
+            )
 anchors:
   - id: 019ff503-40c8-74ce-b554-0c4adcc3eec0
     selector:
@@ -344,6 +294,16 @@ anchors:
         code_anchor: 019ff503-40c8-74a8-98bf-d4461b996fb6
         selector:
           quote: |2-
-                finally:
-                    model.train(was_training)
-                return tuple(generated)
+                generated = generate_tokens(
+                    model,
+                    [example.prompt for example in problem_set.examples],
+                    max_new_tokens=sampling.max_new_tokens,
+                    batch_size=sampling.batch_size,
+                    pad_token=PAD,
+                    eos_token=EOS,
+                    device=device,
+                    select_next=lambda logits: select_evaluation_tokens(
+                        logits, sampling, generator
+                    ),
+                    autocast_dtype=autocast_dtype,
+                )

@@ -10,7 +10,7 @@ from typing import Literal, Sequence
 import torch
 from torch import nn
 
-from .model import Transformer
+from .model import Transformer, generate_tokens
 from .task import (
     BEGIN_ANSWER,
     END_ANSWER,
@@ -54,8 +54,8 @@ class RolloutSamplingConfig:
     top_p: float = 1.0
 
     def __post_init__(self) -> None:
-        group_size = _positive_int(self.group_size, "group_size")
-        max_new_tokens = _positive_int(self.max_new_tokens, "max_new_tokens")
+        for name in ("group_size", "max_new_tokens"):
+            object.__setattr__(self, name, _positive_int(getattr(self, name), name))
         batch_size = self.generation_batch_size
         if batch_size is not None:
             batch_size = _positive_int(batch_size, "generation_batch_size")
@@ -66,8 +66,6 @@ class RolloutSamplingConfig:
                 "training rollouts require temperature=1 and top_p=1 so samples "
                 "come from the policy distribution used by GRPO"
             )
-        object.__setattr__(self, "group_size", group_size)
-        object.__setattr__(self, "max_new_tokens", max_new_tokens)
         object.__setattr__(self, "generation_batch_size", batch_size)
         object.__setattr__(self, "temperature", temperature)
         object.__setattr__(self, "top_p", top_p)
@@ -113,76 +111,26 @@ def collect_grouped_completions(
         for group_id, example in enumerate(examples)
         for _ in range(config.group_size)
     ]
-    if not expanded:
-        return []
-    maximum_prompt_length = max(len(example.prompt) for _, example in expanded)
-    if maximum_prompt_length + config.max_new_tokens > model.config.max_context_length:
-        raise ValueError(
-            "maximum prompt and completion lengths exceed the model context limit"
+    generated = generate_tokens(
+        model,
+        [example.prompt for _, example in expanded],
+        max_new_tokens=config.max_new_tokens,
+        batch_size=config.generation_batch_size,
+        pad_token=PAD,
+        eos_token=EOS,
+        device=device,
+        select_next=lambda logits: sample_policy_tokens(logits, generator),
+        autocast_dtype=autocast_dtype,
+    )
+    return [
+        SampledCompletion(
+            example=example,
+            completion=completion,
+            group_id=group_id,
+            terminated_by_eos=bool(completion and completion[-1] == EOS),
         )
-
-    was_training = model.training
-    model.eval()
-    batch_size = config.generation_batch_size or len(expanded)
-    sampled_completions: list[SampledCompletion] = []
-    amp_enabled = autocast_dtype is not None
-    try:
-        for batch_start in range(0, len(expanded), batch_size):
-            batch = expanded[batch_start : batch_start + batch_size]
-            prompt_length = max(len(example.prompt) for _, example in batch)
-            input_ids = torch.full(
-                (len(batch), prompt_length), PAD, dtype=torch.long, device=device
-            )
-            attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
-            for row, (_, example) in enumerate(batch):
-                length = len(example.prompt)
-                input_ids[row, -length:] = torch.tensor(example.prompt, device=device)
-                attention_mask[row, -length:] = True
-
-            completions: list[list[int]] = [[] for _ in batch]
-            done = torch.zeros(len(batch), dtype=torch.bool, device=device)
-            current = input_ids
-            cache = None
-            for _ in range(config.max_new_tokens):
-                with torch.autocast(
-                    device_type=device.type,
-                    dtype=autocast_dtype,
-                    enabled=amp_enabled,
-                ):
-                    output = model(
-                        current,
-                        attention_mask=attention_mask,
-                        past_key_values=cache,
-                        use_cache=True,
-                    )
-                sampled = sample_policy_tokens(output.logits[:, -1], generator)
-                sampled = torch.where(done, torch.full_like(sampled, PAD), sampled)
-                active_before_action = ~done
-                for row in active_before_action.nonzero(
-                    as_tuple=False
-                ).flatten().tolist():
-                    completions[row].append(int(sampled[row].item()))
-                done |= sampled.eq(EOS)
-                if bool(done.all()):
-                    break
-                current = sampled[:, None]
-                attention_mask = torch.cat(
-                    (attention_mask, active_before_action[:, None]), dim=1
-                )
-                cache = output.past_key_values
-
-            sampled_completions.extend(
-                SampledCompletion(
-                    example=example,
-                    completion=tuple(completion),
-                    group_id=group_id,
-                    terminated_by_eos=bool(completion and completion[-1] == EOS),
-                )
-                for (group_id, example), completion in zip(batch, completions)
-            )
-    finally:
-        model.train(was_training)
-    return sampled_completions
+        for (group_id, example), completion in zip(expanded, generated)
+    ]
 
 
 @dataclass(frozen=True)
@@ -254,17 +202,6 @@ def sterile_repetition_facts(outcome: OutcomeFacts) -> SterileRepetitionFacts:
 
     if outcome.reasoning is None:
         return SterileRepetitionFacts(0, 0, 0.0, 0, 0, 0.0)
-    discovered: set[tuple[int, int]] = set()
-    previous_discovery: dict[tuple[int, int], frozenset[tuple[int, int]]] = {}
-    classified: list[tuple[tuple[int, int], bool]] = []
-    for directed in outcome.reasoning.legal_directed_transitions:
-        edge = canonical_edge(*directed)
-        prior = previous_discovery.get(directed)
-        sterile = prior is not None and prior == frozenset(discovered)
-        discovered.add(edge)
-        previous_discovery[directed] = frozenset(discovered)
-        classified.append((edge, sterile))
-
     answer_edges = (
         {
             canonical_edge(u, v)
@@ -273,22 +210,27 @@ def sterile_repetition_facts(outcome: OutcomeFacts) -> SterileRepetitionFacts:
         if outcome.valid_path
         else set()
     )
-    off_answer = [
-        sterile for edge, sterile in classified if edge not in answer_edges
-    ]
-    sterile_all = sum(sterile for _, sterile in classified)
-    sterile_off_answer = sum(off_answer)
+    discovered: set[tuple[int, int]] = set()
+    previous_discovery: dict[tuple[int, int], frozenset[tuple[int, int]]] = {}
+    legal = sterile_all = off_answer = sterile_off_answer = 0
+    for directed in outcome.reasoning.legal_directed_transitions:
+        edge = canonical_edge(*directed)
+        prior = previous_discovery.get(directed)
+        sterile = prior is not None and prior == frozenset(discovered)
+        discovered.add(edge)
+        previous_discovery[directed] = frozenset(discovered)
+        legal += 1
+        sterile_all += sterile
+        if edge not in answer_edges:
+            off_answer += 1
+            sterile_off_answer += sterile
     return SterileRepetitionFacts(
-        legal_transitions=len(classified),
+        legal_transitions=legal,
         sterile_repetitions_all=sterile_all,
-        repetition_rate_all=(
-            sterile_all / len(classified) if classified else 0.0
-        ),
-        off_answer_legal_transitions=len(off_answer),
+        repetition_rate_all=sterile_all / legal if legal else 0.0,
+        off_answer_legal_transitions=off_answer,
         sterile_repetitions_off_answer=sterile_off_answer,
-        repetition_rate_off_answer=(
-            sterile_off_answer / len(off_answer) if off_answer else 0.0
-        ),
+        repetition_rate_off_answer=(sterile_off_answer / off_answer if off_answer else 0.0),
     )
 
 
@@ -543,39 +485,24 @@ class GRPOConfig:
     advantage_epsilon: float = 1e-6
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "group_size", _positive_int(self.group_size, "group_size"))
-        object.__setattr__(
-            self, "update_epochs", _positive_int(self.update_epochs, "update_epochs")
-        )
-        object.__setattr__(
-            self,
-            "microbatch_size",
-            _positive_int(self.microbatch_size, "microbatch_size"),
-        )
-        clip_epsilon = _nonnegative_real(self.clip_epsilon, "clip_epsilon")
-        if clip_epsilon >= 1.0:
-            raise ValueError("clip_epsilon must be less than one")
-        object.__setattr__(self, "clip_epsilon", clip_epsilon)
-        object.__setattr__(
-            self,
+        for name in ("group_size", "update_epochs", "microbatch_size"):
+            object.__setattr__(self, name, _positive_int(getattr(self, name), name))
+        for name in (
+            "clip_epsilon",
             "kl_coefficient",
-            _nonnegative_real(self.kl_coefficient, "kl_coefficient"),
-        )
-        object.__setattr__(
-            self,
             "valid_coefficient",
-            _nonnegative_real(self.valid_coefficient, "valid_coefficient"),
-        )
-        gradient_clip = _nonnegative_real(self.gradient_clip, "gradient_clip")
-        if gradient_clip == 0.0:
+            "gradient_clip",
+            "advantage_epsilon",
+        ):
+            object.__setattr__(
+                self, name, _nonnegative_real(getattr(self, name), name)
+            )
+        if self.clip_epsilon >= 1.0:
+            raise ValueError("clip_epsilon must be less than one")
+        if self.gradient_clip == 0.0:
             raise ValueError("gradient_clip must be positive")
-        object.__setattr__(self, "gradient_clip", gradient_clip)
-        advantage_epsilon = _nonnegative_real(
-            self.advantage_epsilon, "advantage_epsilon"
-        )
-        if advantage_epsilon == 0.0:
+        if self.advantage_epsilon == 0.0:
             raise ValueError("advantage_epsilon must be positive")
-        object.__setattr__(self, "advantage_epsilon", advantage_epsilon)
 
 
 @dataclass(frozen=True)
