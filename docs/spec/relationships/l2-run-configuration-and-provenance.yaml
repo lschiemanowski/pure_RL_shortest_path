@@ -5,20 +5,6 @@ scope: pure-rl-shortest-path/experiment-protocol-and-evidence/run-configuration-
 realization: implemented
 parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
 anchors:
-  - id: 019ff06a-a006-77e7-a6c7-d3e2119ff2b5
-    selector:
-      quote: A run configuration resolves the task distribution, vocabulary, completion protocol
-        including its minimum reasoning length, transformer architecture, rollout and optimization
-        settings, reward and auxiliary-learning signals, curriculum, evaluation schedule,
-        and artifact locations before training begins. Invalid or mutually incompatible settings
-        are rejected before model updates occur.
-    links:
-      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
-        kind: informational
-      - id: 019ff54c-87f7-704a-b05e-fb972cc40380
-        kind: informational
-      - id: 019ff566-c44f-774b-ba4c-8b2dc0509fe6
-        kind: informational
   - id: 019ff06a-a006-7aca-b501-77212fef2402
     selector:
       quote: Each run records its resolved configuration, random seeds, source revision, and
@@ -38,6 +24,21 @@ anchors:
         coefficient disables its effect on reward without disabling either diagnostic.
     links:
       - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+        kind: informational
+  - id: 019ff06a-a006-77e7-a6c7-d3e2119ff2b5
+    selector:
+      quote: A run configuration resolves the task distribution, vocabulary, completion protocol
+        including its minimum reasoning length, transformer architecture, rollout settings,
+        selected optimization algorithm and its algorithm-specific settings, reward and auxiliary-learning
+        signals, curriculum, evaluation schedule, and artifact locations before training begins.
+        Invalid or mutually incompatible settings are rejected before model updates occur.
+        GRPO remains the default for configurations that omit an algorithm selection.
+    links:
+      - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
+        kind: informational
+      - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+        kind: informational
+      - id: 019ff566-c44f-774b-ba4c-8b2dc0509fe6
         kind: informational
 references:
   - id: 019feb9e-e54d-76f8-a696-ed88088bfaab

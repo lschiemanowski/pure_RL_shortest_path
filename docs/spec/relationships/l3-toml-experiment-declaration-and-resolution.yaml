@@ -7,7 +7,16 @@ parent: 019ff06a-a005-793f-92cd-fda20e6db21c
 covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
-      quote: from dataclasses import MISSING, asdict, dataclass, fields, is_dataclass, replace
+      quote: |-
+        from dataclasses import (
+            MISSING,
+            asdict,
+            dataclass,
+            field,
+            fields,
+            is_dataclass,
+            replace,
+        )
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: from typing import Any, Literal, Mapping, Sequence, TypeVar
@@ -114,6 +123,8 @@ covers:
             evaluation: EvaluationScheduleConfig
             artifacts: ArtifactConfig
             runtime: RuntimeConfig
+            algorithm: Literal["grpo", "ppo"] = "grpo"
+            ppo: PPOConfig = field(default_factory=PPOConfig)
 
             def __post_init__(self) -> None:
                 version = _plain_int(self.schema_version, "schema_version")
@@ -136,7 +147,12 @@ covers:
                     raise ConfigurationError(
                         "model vocabulary size must be derived from the task vocabulary"
                     )
-                if self.grpo.group_size != self.rollout.group_size:
+                if self.algorithm not in ("grpo", "ppo"):
+                    raise ConfigurationError("algorithm must be grpo or ppo")
+                if (
+                    self.algorithm == "grpo"
+                    and self.grpo.group_size != self.rollout.group_size
+                ):
                     raise ConfigurationError(
                         "GRPO group size must equal the rollout comparison-group size"
                     )
@@ -177,15 +193,91 @@ covers:
             schema_version = root.take("schema_version")
             name = root.take("name")
             seed = root.take("seed")
-  - path: src/pure_rl_shortest_path/run.py
-    selector:
-      quote: |2-
+            algorithm = root.take("algorithm", "grpo")
+
+            task = root.table("task", required=True)
+            vocabulary = Vocabulary(task.take("node_label_count"))
+            minimum_reason_tokens = _positive_int(
+                task.take("minimum_reason_tokens", 1), "task.minimum_reason_tokens"
+            )
+            task.finish()
+
+            model_data = root.table("model")
+            model = model_data.build(
+                TransformerConfig,
+                aliases={"n_layers": "layers", "n_heads": "heads"},
+                fixed={"vocab_size": vocabulary.size},
+            )
+            model_data.finish()
+
+            rollout_data = root.table("rollout")
+            rollout = rollout_data.build(
+                RolloutSamplingConfig,
+                defaults={"group_size": 8, "max_new_tokens": 96},
+            )
+            rollout_data.finish()
+
             reward_data = root.table("reward")
             reward = reward_data.build(RewardConfig)
             reward_data.finish()
-  - path: src/pure_rl_shortest_path/run.py
-    selector:
-      quote: |2-
+
+            optimization = root.table("optimization")
+            optimizer = optimization.build(OptimizerConfig)
+            grpo = optimization.build(
+                GRPOConfig,
+                defaults={"update_epochs": 2, "kl_coefficient": 0.001},
+                fixed={"group_size": rollout.group_size},
+            )
+            optimization.finish()
+
+            ppo_data = root.table("ppo")
+            ppo = ppo_data.build(PPOConfig)
+            ppo_data.finish()
+
+            curriculum_data = root.table("curriculum", required=True)
+            stages_data = curriculum_data.take("stages")
+            if not isinstance(stages_data, list) or not stages_data:
+                raise ConfigurationError(
+                    "curriculum.stages must be a nonempty array of tables"
+                )
+            stages = tuple(
+                _graph_stage(stage, index) for index, stage in enumerate(stages_data)
+            )
+            curriculum = curriculum_data.build(CurriculumConfig, fixed={"stages": stages})
+            curriculum_data.finish()
+
+            training_data = root.table("training")
+            training = training_data.build(TrainingScheduleConfig)
+            training_data.finish()
+
+            evaluation_data = root.table("evaluation")
+            evaluation_sampling = evaluation_data.build(
+                EvaluationSamplingConfig,
+                defaults={"max_new_tokens": rollout.max_new_tokens},
+            )
+            evaluation = evaluation_data.build(
+                EvaluationScheduleConfig,
+                defaults={"every_steps": 100, "example_count": 256},
+                fixed={"sampling": evaluation_sampling},
+            )
+            evaluation_data.finish()
+
+            artifacts_data = root.table("artifacts", required=True)
+            output_text = _nonempty_string(
+                artifacts_data.take("output_root"), "artifacts.output_root"
+            )
+            output_root = Path(output_text).expanduser()
+            if not output_root.is_absolute():
+                output_root = declaration_directory / output_root
+            output_root = output_root.resolve()
+            artifacts = artifacts_data.build(ArtifactConfig, fixed={"output_root": output_root})
+            artifacts_data.finish()
+
+            runtime_data = root.table("runtime")
+            runtime = runtime_data.build(RuntimeConfig)
+            runtime_data.finish()
+            root.finish()
+
             return RunConfiguration(
                 schema_version=schema_version,
                 name=name,
@@ -202,85 +294,209 @@ covers:
                 evaluation=evaluation,
                 artifacts=artifacts,
                 runtime=runtime,
-            )
-  - path: src/pure_rl_shortest_path/run.py
-    selector:
-      quote: |-
-        def load_run_configuration(path: str | Path) -> LoadedRunConfiguration:
-            """Read one TOML declaration and retain both source and resolved identities."""
-
-            source_path = Path(path).expanduser().resolve()
-            source_bytes = source_path.read_bytes()
-            try:
-                declaration = tomllib.loads(source_bytes.decode("utf-8"))
-            except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-                raise ConfigurationError(f"invalid TOML configuration: {error}") from error
-            resolved = resolve_run_configuration(
-                declaration, declaration_directory=source_path.parent
-            )
-            resolved_bytes = _canonical_json_bytes(resolved_configuration_record(resolved))
-            return LoadedRunConfiguration(
-                source_path=source_path,
-                source_bytes=source_bytes,
-                resolved=resolved,
-                source_sha256=hashlib.sha256(source_bytes).hexdigest(),
-                resolved_sha256=hashlib.sha256(resolved_bytes).hexdigest(),
+                algorithm=algorithm,
+                ppo=ppo,
             )
 anchors:
   - id: 019ff54c-87f7-74d5-9be7-8ff766f24cd3
     selector:
-      quote: |-
-        A fresh training run begins from one versioned TOML experiment declaration. Its
-        named sections describe the task vocabulary and positive
-        `minimum_reason_tokens` requirement, curriculum stages and mixture,
-        transformer architecture, rollout collection, reward shaping, auxiliary
-        objective, GRPO update, evaluation schedule, checkpoint schedule, runtime, and
-        artifact location. The minimum-reasoning requirement defaults to one when
-        omitted for compatibility. Ordered values such as curriculum stages retain
-        their declared order.
+      quote: A fresh training run begins from one versioned TOML experiment declaration. Its
+        root `algorithm` selects `"grpo"` or `"ppo"` and defaults to GRPO when omitted. Named
+        sections describe task and minimum-reasoning semantics, curriculum, transformer architecture,
+        rollout collection, reward shaping, shared optimizer settings, GRPO settings, PPO
+        settings, evaluation, checkpoints, runtime, and artifacts. The resolved record retains
+        both algorithm sections so comparisons remain explicit.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
-        code_anchor: 019ff54c-87f7-716a-a961-0e04b6851ff1
+        code_anchor: 01a014d0-5500-741e-af0b-8ccd1808df50
         selector:
-          quote: |2-
+          quote: |-
+            @dataclass(frozen=True)
+            class RunConfiguration:
+                """All scientific and operational settings after TOML resolution."""
+
+                schema_version: int
+                name: str
+                master_seed: int
+                vocabulary: Vocabulary
+                minimum_reason_tokens: int
+                model: TransformerConfig
+                rollout: RolloutSamplingConfig
+                reward: RewardConfig
+                optimizer: OptimizerConfig
+                grpo: GRPOConfig
+                curriculum: CurriculumConfig
+                training: TrainingScheduleConfig
+                evaluation: EvaluationScheduleConfig
+                artifacts: ArtifactConfig
+                runtime: RuntimeConfig
+                algorithm: Literal["grpo", "ppo"] = "grpo"
+                ppo: PPOConfig = field(default_factory=PPOConfig)
+
+                def __post_init__(self) -> None:
+                    version = _plain_int(self.schema_version, "schema_version")
+                    if version != CONFIG_SCHEMA_VERSION:
+                        raise ConfigurationError(
+                            f"unsupported schema_version {version}; expected "
+                            f"{CONFIG_SCHEMA_VERSION}"
+                        )
+                    name = _nonempty_string(self.name, "name")
+                    seed = _seed(self.master_seed, "seed")
+                    minimum_reason_tokens = _positive_int(
+                        self.minimum_reason_tokens, "task.minimum_reason_tokens"
+                    )
+                    largest_graph = max(stage.vertices for stage in self.curriculum.stages)
+                    if self.vocabulary.node_label_count < largest_graph:
+                        raise ConfigurationError(
+                            "task.node_label_count must cover every curriculum stage"
+                        )
+                    if self.model.vocab_size != self.vocabulary.size:
+                        raise ConfigurationError(
+                            "model vocabulary size must be derived from the task vocabulary"
+                        )
+                    if self.algorithm not in ("grpo", "ppo"):
+                        raise ConfigurationError("algorithm must be grpo or ppo")
+                    if (
+                        self.algorithm == "grpo"
+                        and self.grpo.group_size != self.rollout.group_size
+                    ):
+                        raise ConfigurationError(
+                            "GRPO group size must equal the rollout comparison-group size"
+                        )
+                    maximum_prompt = max(2 * stage.edges + 7 for stage in self.curriculum.stages)
+                    required_context = maximum_prompt + max(
+                        self.rollout.max_new_tokens,
+                        self.evaluation.sampling.max_new_tokens,
+                    )
+                    if required_context > self.model.max_context_length:
+                        raise ConfigurationError(
+                            "model.max_context_length is smaller than the largest configured "
+                            "prompt plus completion budget"
+                        )
+                    minimum_completion = minimum_reason_tokens + 5
+                    if min(
+                        self.rollout.max_new_tokens,
+                        self.evaluation.sampling.max_new_tokens,
+                    ) < minimum_completion:
+                        raise ConfigurationError(
+                            "completion budgets must fit the minimum reasoning segment and "
+                            "the shortest well-formed answer"
+                        )
+                    object.__setattr__(self, "schema_version", version)
+                    object.__setattr__(self, "name", name)
+                    object.__setattr__(self, "master_seed", seed)
+                    object.__setattr__(
+                        self, "minimum_reason_tokens", minimum_reason_tokens
+                    )
+  - id: 019ff54c-87f7-720c-9062-62c09a55bf81
+    selector:
+      quote: Loading converts the TOML data into typed configurations. It validates the selected
+        algorithm, applies PPO defaults for clipping, discount, trace decay, value and entropy
+        coefficients, epochs, and microbatching, and applies the GRPO group-size compatibility
+        rule only when GRPO is selected. Unknown keys, invalid types, impossible completion
+        budgets, and incompatible settings are rejected before a model or run directory is
+        created.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 01a014d0-551f-70ba-aa9e-735ba3946122
+        selector:
+          quote: |-
+            def resolve_run_configuration(
+                declaration: Mapping[str, Any], *, declaration_directory: Path
+            ) -> RunConfiguration:
+                """Resolve a parsed TOML declaration into the project's typed contracts."""
+
                 root = _ConfigTable(declaration, "root")
                 schema_version = root.take("schema_version")
                 name = root.take("name")
                 seed = root.take("seed")
-  - id: 019ff5c5-0a59-71ac-8627-7415923ba6a7
-    selector:
-      quote: |-
-        The reward section independently declares `coverage_coefficient`,
-        `sterile_repetition_coefficient`, and `sterile_repetition_mode`, whose value is
-        either `"all"` or `"off_answer"`. Zero coefficients remain explicit resolved
-        values rather than removing the corresponding diagnostics from experiment
-        evidence.
-    links:
-      - path: src/pure_rl_shortest_path/run.py
-        kind: contractual
-        code_anchor: 019ff5f7-c5bd-73d0-91e2-ba99dfc6feb1
-        selector:
-          quote: |2-
+                algorithm = root.take("algorithm", "grpo")
+
+                task = root.table("task", required=True)
+                vocabulary = Vocabulary(task.take("node_label_count"))
+                minimum_reason_tokens = _positive_int(
+                    task.take("minimum_reason_tokens", 1), "task.minimum_reason_tokens"
+                )
+                task.finish()
+
+                model_data = root.table("model")
+                model = model_data.build(
+                    TransformerConfig,
+                    aliases={"n_layers": "layers", "n_heads": "heads"},
+                    fixed={"vocab_size": vocabulary.size},
+                )
+                model_data.finish()
+
+                rollout_data = root.table("rollout")
+                rollout = rollout_data.build(
+                    RolloutSamplingConfig,
+                    defaults={"group_size": 8, "max_new_tokens": 96},
+                )
+                rollout_data.finish()
+
                 reward_data = root.table("reward")
                 reward = reward_data.build(RewardConfig)
                 reward_data.finish()
-  - id: 019ff54c-87f7-720c-9062-62c09a55bf81
-    selector:
-      quote: |-
-        Loading converts the TOML data into the typed configurations used by the task,
-        policy, trainer, curriculum, and evaluation implementations. Unknown keys,
-        missing required values, invalid types, and mutually incompatible settings are
-        rejected before a model or run directory is created. Completion budgets must
-        accommodate the declared minimum reasoning segment plus the shortest
-        structurally valid answer. Defaults inserted during resolution become explicit
-        in the resolved configuration.
-    links:
-      - path: src/pure_rl_shortest_path/run.py
-        kind: contractual
-        code_anchor: 019ff54c-87f7-7572-903e-7a8969ad1b30
-        selector:
-          quote: |2-
+
+                optimization = root.table("optimization")
+                optimizer = optimization.build(OptimizerConfig)
+                grpo = optimization.build(
+                    GRPOConfig,
+                    defaults={"update_epochs": 2, "kl_coefficient": 0.001},
+                    fixed={"group_size": rollout.group_size},
+                )
+                optimization.finish()
+
+                ppo_data = root.table("ppo")
+                ppo = ppo_data.build(PPOConfig)
+                ppo_data.finish()
+
+                curriculum_data = root.table("curriculum", required=True)
+                stages_data = curriculum_data.take("stages")
+                if not isinstance(stages_data, list) or not stages_data:
+                    raise ConfigurationError(
+                        "curriculum.stages must be a nonempty array of tables"
+                    )
+                stages = tuple(
+                    _graph_stage(stage, index) for index, stage in enumerate(stages_data)
+                )
+                curriculum = curriculum_data.build(CurriculumConfig, fixed={"stages": stages})
+                curriculum_data.finish()
+
+                training_data = root.table("training")
+                training = training_data.build(TrainingScheduleConfig)
+                training_data.finish()
+
+                evaluation_data = root.table("evaluation")
+                evaluation_sampling = evaluation_data.build(
+                    EvaluationSamplingConfig,
+                    defaults={"max_new_tokens": rollout.max_new_tokens},
+                )
+                evaluation = evaluation_data.build(
+                    EvaluationScheduleConfig,
+                    defaults={"every_steps": 100, "example_count": 256},
+                    fixed={"sampling": evaluation_sampling},
+                )
+                evaluation_data.finish()
+
+                artifacts_data = root.table("artifacts", required=True)
+                output_text = _nonempty_string(
+                    artifacts_data.take("output_root"), "artifacts.output_root"
+                )
+                output_root = Path(output_text).expanduser()
+                if not output_root.is_absolute():
+                    output_root = declaration_directory / output_root
+                output_root = output_root.resolve()
+                artifacts = artifacts_data.build(ArtifactConfig, fixed={"output_root": output_root})
+                artifacts_data.finish()
+
+                runtime_data = root.table("runtime")
+                runtime = runtime_data.build(RuntimeConfig)
+                runtime_data.finish()
+                root.finish()
+
                 return RunConfiguration(
                     schema_version=schema_version,
                     name=name,
@@ -297,29 +513,33 @@ anchors:
                     evaluation=evaluation,
                     artifacts=artifacts,
                     runtime=runtime,
+                    algorithm=algorithm,
+                    ppo=ppo,
                 )
-  - id: 019ff54c-87f7-7095-a814-3c7d1aaf6ed9
+  - id: 019ff5c5-0a59-71ac-8627-7415923ba6a7
     selector:
-      quote: |-
-        The run retains both the input TOML file verbatim and a canonical resolved
-        configuration record. The command line does not provide a parallel collection
-        of scientific hyperparameter flags. Any supported operational override is
-        included in the resolved record rather than silently changing the declaration.
+      quote: The reward section independently declares `coverage_coefficient`, `sterile_repetition_coefficient`,
+        and `sterile_repetition_mode`, whose value is either `"all"` or `"off_answer"`. Zero
+        coefficients remain explicit resolved values rather than removing the corresponding
+        diagnostics from experiment evidence.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
-        code_anchor: 019ff54c-87f7-7dca-a10b-64c56f724615
+        code_anchor: 019ff5f7-c5bd-73d0-91e2-ba99dfc6feb1
         selector:
           quote: |2-
-                source_bytes = source_path.read_bytes()
-                try:
-                    declaration = tomllib.loads(source_bytes.decode("utf-8"))
-                except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-                    raise ConfigurationError(f"invalid TOML configuration: {error}") from error
-                resolved = resolve_run_configuration(
-                    declaration, declaration_directory=source_path.parent
-                )
-                resolved_bytes = _canonical_json_bytes(resolved_configuration_record(resolved))
+                reward_data = root.table("reward")
+                reward = reward_data.build(RewardConfig)
+                reward_data.finish()
+  - id: 019ff54c-87f7-7095-a814-3c7d1aaf6ed9
+    selector:
+      quote: The run retains both the input TOML file verbatim and a canonical resolved configuration
+        record. The command line does not provide a parallel collection of scientific hyperparameter
+        flags. Any supported operational override is included in the resolved record rather
+        than silently changing the declaration.
+    links:
+      - id: 019ff06a-a005-793f-92cd-fda20e6db21c
+        kind: informational
 references:
   - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
     kind: contractual

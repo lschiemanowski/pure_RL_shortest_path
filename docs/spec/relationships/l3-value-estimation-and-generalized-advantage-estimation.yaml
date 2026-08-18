@@ -1,0 +1,314 @@
+id: 01a014a1-15c1-75e3-bb0b-d150f5ea5048
+description: docs/spec/nodes/l3-value-estimation-and-generalized-advantage-estimation.md
+level: L3
+scope: pure-rl-shortest-path/reinforcement-learning-trainer/ppo-clip-policy-and-value-update/value-estimation-and-generalized-advantage-estimation
+realization: implemented
+parent: 01a0149f-9d0d-7068-bbe4-09e4cf655e50
+covers:
+  - path: src/pure_rl_shortest_path/ppo.py
+    selector:
+      quote: |-
+        class ValueHead(nn.Module):
+            """Training-only scalar prediction from final normalized hidden states."""
+
+            def __init__(self, hidden_size: int) -> None:
+                super().__init__()
+                self.projection = nn.Linear(_positive_int(hidden_size, "hidden_size"), 1)
+                nn.init.normal_(self.projection.weight, mean=0.0, std=0.02)
+                nn.init.zeros_(self.projection.bias)
+
+            def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+                if hidden_states.ndim != 3:
+                    raise ValueError("hidden_states must have shape [batch, length, hidden]")
+                return self.projection(hidden_states).squeeze(-1).float()
+  - path: src/pure_rl_shortest_path/ppo.py
+    selector:
+      quote: |-
+        def generalized_advantages(
+            terminal_rewards: torch.Tensor,
+            values: torch.Tensor,
+            action_mask: torch.Tensor,
+            *,
+            gamma: float,
+            gae_lambda: float,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Compute masked GAE with reward only on each trajectory's final action."""
+
+            if terminal_rewards.ndim != 1 or values.ndim != 2:
+                raise ValueError("terminal_rewards and values must be a vector and matrix")
+            if (
+                values.shape != action_mask.shape
+                or values.shape[0] != terminal_rewards.shape[0]
+            ):
+                raise ValueError("values, action_mask, and rewards have incompatible shapes")
+            gamma = _bounded_real(
+                gamma, "gamma", minimum=0.0, maximum=1.0, include_minimum=True
+            )
+            gae_lambda = _bounded_real(
+                gae_lambda, "gae_lambda", minimum=0.0, maximum=1.0, include_minimum=True
+            )
+            advantages = torch.zeros_like(values, dtype=torch.float32)
+            for row in range(values.shape[0]):
+                positions = action_mask[row].nonzero(as_tuple=False).flatten()
+                following_advantage = values.new_zeros((), dtype=torch.float32)
+                following_value = values.new_zeros((), dtype=torch.float32)
+                for reverse_index in range(positions.numel() - 1, -1, -1):
+                    position = int(positions[reverse_index].item())
+                    reward = (
+                        terminal_rewards[row]
+                        if reverse_index == positions.numel() - 1
+                        else 0.0
+                    )
+                    delta = reward + gamma * following_value - values[row, position]
+                    following_advantage = delta + gamma * gae_lambda * following_advantage
+                    advantages[row, position] = following_advantage
+                    following_value = values[row, position]
+            returns = advantages + values.float()
+            return advantages, returns
+  - path: src/pure_rl_shortest_path/ppo.py
+    selector:
+      quote: |-
+        def normalize_advantages(
+            advantages: torch.Tensor, action_mask: torch.Tensor, epsilon: float
+        ) -> torch.Tensor:
+            """Normalize real actions, retaining raw constant advantages."""
+
+            if advantages.shape != action_mask.shape:
+                raise ValueError("advantages and action_mask must have equal shape")
+            epsilon = _bounded_real(
+                epsilon,
+                "epsilon",
+                minimum=0.0,
+                maximum=float("inf"),
+                include_minimum=False,
+            )
+            selected = advantages[action_mask]
+            if selected.numel() == 0:
+                raise ValueError("at least one sampled action is required")
+            standard_deviation = selected.std(unbiased=False)
+            if (
+                not bool(torch.isfinite(standard_deviation))
+                or float(standard_deviation) <= epsilon
+            ):
+                return advantages.clone()
+            result = torch.zeros_like(advantages)
+            result[action_mask] = (selected - selected.mean()) / (
+                standard_deviation + epsilon
+            )
+            return result
+  - path: src/pure_rl_shortest_path/ppo.py
+    selector:
+      quote: |-
+        @torch.no_grad()
+        def prepare_ppo_batch(
+            actor: Transformer,
+            value_head: ValueHead,
+            packed: PackedRollouts,
+            config: PPOConfig,
+            *,
+            autocast_dtype: torch.dtype | None = None,
+        ) -> PPOBatch:
+            """Freeze rollout-time policy and value statistics and construct GAE targets."""
+
+            actor.eval()
+            value_head.eval()
+            old_log_probabilities: list[torch.Tensor] = []
+            old_values: list[torch.Tensor] = []
+            amp_enabled = autocast_dtype is not None
+            for start in range(0, packed.input_ids.shape[0], config.microbatch_size):
+                chunk = packed.slice(start, start + config.microbatch_size)
+                with torch.autocast(
+                    device_type=packed.input_ids.device.type,
+                    dtype=autocast_dtype,
+                    enabled=amp_enabled,
+                ):
+                    logits, hidden_states = actor.forward_with_hidden_states(
+                        chunk.input_ids,
+                        attention_mask=chunk.attention_mask,
+                    )
+                    old_log_probabilities.append(
+                        _gathered_log_probabilities(logits, chunk.labels)
+                    )
+                    old_values.append(value_head(hidden_states))
+            log_probabilities = torch.cat(old_log_probabilities)
+            values = torch.cat(old_values)
+            advantages, returns = generalized_advantages(
+                packed.rewards,
+                values,
+                packed.action_mask,
+                gamma=config.gamma,
+                gae_lambda=config.gae_lambda,
+            )
+            advantages = normalize_advantages(
+                advantages, packed.action_mask, config.advantage_epsilon
+            )
+            return PPOBatch(packed, log_probabilities, values, advantages, returns)
+anchors:
+  - id: 01a014a1-15c1-7957-8b13-2a7485caa878
+    selector:
+      quote: A scalar value head reads the transformer's final normalized hidden state at
+        every sampled action position and predicts expected discounted verifier return. It
+        is initialized and optimized only for PPO training; policy sampling, reference scoring,
+        and evaluation remain actor-only. Rollout collection stores detached value predictions
+        alongside action log probabilities.
+    links:
+      - path: src/pure_rl_shortest_path/ppo.py
+        kind: contractual
+        code_anchor: 01a014d0-5633-7eab-bfd7-e3ef3f2b0908
+        selector:
+          quote: |-
+            class ValueHead(nn.Module):
+                """Training-only scalar prediction from final normalized hidden states."""
+
+                def __init__(self, hidden_size: int) -> None:
+                    super().__init__()
+                    self.projection = nn.Linear(_positive_int(hidden_size, "hidden_size"), 1)
+                    nn.init.normal_(self.projection.weight, mean=0.0, std=0.02)
+                    nn.init.zeros_(self.projection.bias)
+
+                def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+                    if hidden_states.ndim != 3:
+                        raise ValueError("hidden_states must have shape [batch, length, hidden]")
+                    return self.projection(hidden_states).squeeze(-1).float()
+      - path: src/pure_rl_shortest_path/ppo.py
+        kind: contractual
+        code_anchor: 01a014d0-563b-753c-8314-49a0c4e5bd1c
+        selector:
+          quote: |-
+            @torch.no_grad()
+            def prepare_ppo_batch(
+                actor: Transformer,
+                value_head: ValueHead,
+                packed: PackedRollouts,
+                config: PPOConfig,
+                *,
+                autocast_dtype: torch.dtype | None = None,
+            ) -> PPOBatch:
+                """Freeze rollout-time policy and value statistics and construct GAE targets."""
+
+                actor.eval()
+                value_head.eval()
+                old_log_probabilities: list[torch.Tensor] = []
+                old_values: list[torch.Tensor] = []
+                amp_enabled = autocast_dtype is not None
+                for start in range(0, packed.input_ids.shape[0], config.microbatch_size):
+                    chunk = packed.slice(start, start + config.microbatch_size)
+                    with torch.autocast(
+                        device_type=packed.input_ids.device.type,
+                        dtype=autocast_dtype,
+                        enabled=amp_enabled,
+                    ):
+                        logits, hidden_states = actor.forward_with_hidden_states(
+                            chunk.input_ids,
+                            attention_mask=chunk.attention_mask,
+                        )
+                        old_log_probabilities.append(
+                            _gathered_log_probabilities(logits, chunk.labels)
+                        )
+                        old_values.append(value_head(hidden_states))
+                log_probabilities = torch.cat(old_log_probabilities)
+                values = torch.cat(old_values)
+                advantages, returns = generalized_advantages(
+                    packed.rewards,
+                    values,
+                    packed.action_mask,
+                    gamma=config.gamma,
+                    gae_lambda=config.gae_lambda,
+                )
+                advantages = normalize_advantages(
+                    advantages, packed.action_mask, config.advantage_epsilon
+                )
+                return PPOBatch(packed, log_probabilities, values, advantages, returns)
+  - id: 01a014a1-15c1-76b0-b913-b29c9374a3e8
+    selector:
+      quote: For a trajectory with terminal completion reward on its final action and zero
+        intermediate rewards, temporal-difference residuals are computed as \(\delta_t=r_t+\gamma
+        V_{t+1}-V_t\), with zero bootstrap after termination. Reverse accumulation \(A_t=\delta_t+\gamma\lambda
+        A_{t+1}\) produces generalized advantages, and \(R_t=A_t+V_t\) produces fixed value
+        targets. Padding never contributes.
+    links:
+      - path: src/pure_rl_shortest_path/ppo.py
+        kind: contractual
+        code_anchor: 01a014d0-5643-7c4d-9b14-fcb762845466
+        selector:
+          quote: |-
+            def generalized_advantages(
+                terminal_rewards: torch.Tensor,
+                values: torch.Tensor,
+                action_mask: torch.Tensor,
+                *,
+                gamma: float,
+                gae_lambda: float,
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                """Compute masked GAE with reward only on each trajectory's final action."""
+
+                if terminal_rewards.ndim != 1 or values.ndim != 2:
+                    raise ValueError("terminal_rewards and values must be a vector and matrix")
+                if (
+                    values.shape != action_mask.shape
+                    or values.shape[0] != terminal_rewards.shape[0]
+                ):
+                    raise ValueError("values, action_mask, and rewards have incompatible shapes")
+                gamma = _bounded_real(
+                    gamma, "gamma", minimum=0.0, maximum=1.0, include_minimum=True
+                )
+                gae_lambda = _bounded_real(
+                    gae_lambda, "gae_lambda", minimum=0.0, maximum=1.0, include_minimum=True
+                )
+                advantages = torch.zeros_like(values, dtype=torch.float32)
+                for row in range(values.shape[0]):
+                    positions = action_mask[row].nonzero(as_tuple=False).flatten()
+                    following_advantage = values.new_zeros((), dtype=torch.float32)
+                    following_value = values.new_zeros((), dtype=torch.float32)
+                    for reverse_index in range(positions.numel() - 1, -1, -1):
+                        position = int(positions[reverse_index].item())
+                        reward = (
+                            terminal_rewards[row]
+                            if reverse_index == positions.numel() - 1
+                            else 0.0
+                        )
+                        delta = reward + gamma * following_value - values[row, position]
+                        following_advantage = delta + gamma * gae_lambda * following_advantage
+                        advantages[row, position] = following_advantage
+                        following_value = values[row, position]
+                returns = advantages + values.float()
+                return advantages, returns
+  - id: 01a014a1-15c1-71b8-b282-39a68c3daf10
+    selector:
+      quote: Advantages are normalized across real sampled actions when their finite standard
+        deviation exceeds the declared numerical tolerance. Otherwise the original advantages
+        are retained, so an equal nonzero terminal signal can still train the policy.
+    links:
+      - path: src/pure_rl_shortest_path/ppo.py
+        kind: contractual
+        code_anchor: 01a014d0-564b-7026-954f-e1d8269f8e48
+        selector:
+          quote: |-
+            def normalize_advantages(
+                advantages: torch.Tensor, action_mask: torch.Tensor, epsilon: float
+            ) -> torch.Tensor:
+                """Normalize real actions, retaining raw constant advantages."""
+
+                if advantages.shape != action_mask.shape:
+                    raise ValueError("advantages and action_mask must have equal shape")
+                epsilon = _bounded_real(
+                    epsilon,
+                    "epsilon",
+                    minimum=0.0,
+                    maximum=float("inf"),
+                    include_minimum=False,
+                )
+                selected = advantages[action_mask]
+                if selected.numel() == 0:
+                    raise ValueError("at least one sampled action is required")
+                standard_deviation = selected.std(unbiased=False)
+                if (
+                    not bool(torch.isfinite(standard_deviation))
+                    or float(standard_deviation) <= epsilon
+                ):
+                    return advantages.clone()
+                result = torch.zeros_like(advantages)
+                result[action_mask] = (selected - selected.mean()) / (
+                    standard_deviation + epsilon
+                )
+                return result

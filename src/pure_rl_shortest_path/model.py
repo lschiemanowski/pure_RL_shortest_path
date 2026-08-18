@@ -250,6 +250,28 @@ class Transformer(nn.Module):
         logits = self.lm_head(self.final_norm(hidden))
         return ModelOutput(logits, tuple(caches) if use_cache else None)
 
+    def forward_with_hidden_states(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Score a full prefix and expose normalized states for a value head."""
+
+        if input_ids.ndim != 2 or input_ids.shape[1] == 0:
+            raise ValueError("input_ids must have shape [batch, positive_length]")
+        batch, length = input_ids.shape
+        if length > self.config.max_context_length:
+            raise ValueError("effective prefix exceeds max_context_length")
+        if attention_mask is not None and attention_mask.shape != (batch, length):
+            raise ValueError(
+                "attention_mask must have shape [batch, effective_prefix_length]"
+            )
+        hidden = self.embedding(input_ids)
+        for block in self.blocks:
+            hidden, _ = block(hidden, attention_mask=attention_mask)
+        hidden = self.final_norm(hidden)
+        return self.lm_head(hidden), hidden
+
 
 @torch.no_grad()
 def generate_tokens(

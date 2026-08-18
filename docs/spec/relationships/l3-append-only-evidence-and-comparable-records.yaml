@@ -75,7 +75,7 @@ covers:
         def training_evidence_payload(
             batch: TrainingProblemBatch,
             rollouts: Sequence[Rollout],
-            update: UpdateMetrics,
+            update: UpdateMetrics | PPOMetrics,
             configuration: RunConfiguration,
         ) -> dict[str, object]:
             count = len(rollouts)
@@ -92,7 +92,38 @@ covers:
                     "total_reward",
                 )
             }
+            optimizer_metrics: dict[str, object]
+            if isinstance(update, PPOMetrics):
+                optimizer_metrics = {
+                    "policy_loss": update.policy_loss,
+                    "value_loss": update.value_loss,
+                    "entropy": update.entropy,
+                    "sampled_kl": update.sampled_kl,
+                    "valid_next_loss": update.valid_loss,
+                    "valid_next_mass": update.valid_mass,
+                    "clip_fraction": update.clip_fraction,
+                    "explained_variance": update.explained_variance,
+                    "total_loss": update.total_loss,
+                    "gradient_norm": update.gradient_norm,
+                    "value_coefficient": configuration.ppo.value_coefficient,
+                    "entropy_coefficient": configuration.ppo.entropy_coefficient,
+                    "kl_coefficient": configuration.ppo.kl_coefficient,
+                    "valid_coefficient": configuration.ppo.valid_coefficient,
+                }
+            else:
+                optimizer_metrics = {
+                    "policy_loss": update.policy_loss,
+                    "sampled_kl": update.sampled_kl,
+                    "valid_next_loss": update.valid_loss,
+                    "valid_next_mass": update.valid_mass,
+                    "total_loss": update.total_loss,
+                    "zero_variance_group_fraction": update.zero_variance_group_fraction,
+                    "gradient_norm": update.gradient_norm,
+                    "kl_coefficient": configuration.grpo.kl_coefficient,
+                    "valid_coefficient": configuration.grpo.valid_coefficient,
+                }
             return {
+                "algorithm": configuration.algorithm,
                 "frontier": batch.frontier,
                 "problem_count": len(batch.examples),
                 "rollout_count": count,
@@ -111,26 +142,13 @@ covers:
                     configuration.reward.sterile_repetition_coefficient
                 ),
                 "sterile_repetition_mode": configuration.reward.sterile_repetition_mode,
-                "policy_loss": update.policy_loss,
-                "sampled_kl": update.sampled_kl,
-                "valid_next_loss": update.valid_loss,
-                "valid_next_mass": update.valid_mass,
-                "total_loss": update.total_loss,
-                "kl_coefficient": configuration.grpo.kl_coefficient,
-                "valid_coefficient": configuration.grpo.valid_coefficient,
                 "minimum_reason_tokens": configuration.minimum_reason_tokens,
-                "zero_variance_group_fraction": update.zero_variance_group_fraction,
-                "gradient_norm": update.gradient_norm,
                 "sampling": _plain_data(configuration.rollout),
+                **optimizer_metrics,
             }
   - path: src/pure_rl_shortest_path/run.py
     selector:
-      quote: |-
-        def evaluation_evidence_payload(
-            result: EvaluationResult,
-            *,
-            frontier: int | None,
-        ) -> dict[str, object]:
+      quote: |2-
             return {
                 "frontier": frontier,
                 "policy_checkpoint": result.protocol.policy_checkpoint,
@@ -144,40 +162,6 @@ covers:
             }
   - path: src/pure_rl_shortest_path/run.py
     selector:
-      quote: |-
-        def representative_completion_payload(
-            rollout: Rollout,
-            *,
-            vocabulary: Vocabulary,
-            stage_index: int,
-            selection_rule: str,
-        ) -> dict[str, object]:
-            example = rollout.example
-            return {
-                "selection_rule": selection_rule,
-                "stage_index": stage_index,
-                "graph": {
-                    "vertex_count": example.problem.vertex_count,
-                    "abstract_edges": _plain_data(example.problem.edges),
-                    "abstract_source": example.problem.source,
-                    "abstract_target": example.problem.target,
-                    "shortest_distance": example.problem.shortest_distance,
-                    "label_by_vertex": list(example.label_by_vertex),
-                    "visible_edges": _plain_data(example.edges),
-                    "serialized_edges": _plain_data(example.serialized_edges),
-                    "source": example.source,
-                    "target": example.target,
-                },
-                "prompt_tokens": list(example.prompt),
-                "prompt_text": vocabulary.render(example.prompt),
-                "completion_tokens": list(rollout.completion),
-                "completion_text": vocabulary.render(rollout.completion),
-                "terminated_by_eos": rollout.sample.terminated_by_eos,
-                "parsed_and_verified": _plain_data(rollout.outcome),
-                "reward": _plain_data(rollout.reward),
-            }
-  - path: src/pure_rl_shortest_path/run.py
-    selector:
       quote: |2-
                         selected = rollouts[:: configuration.rollout.group_size][
                             : configuration.artifacts.representative_count
@@ -185,34 +169,98 @@ covers:
 anchors:
   - id: 019ff566-c44f-7647-a24c-9da41e4f5def
     selector:
-      quote: |-
-        Training writes schema-versioned JSON Lines records by appending complete
-        records and synchronizing them to disk. Every event identifies its run,
-        completed step, and resolved-configuration digest. Training records retain the
-        declared minimum-reasoning requirement, realized curriculum mixture, exact
-        rollout outcome counts, separate base, coverage, and total rewards, separate
-        policy, KL, and valid-next loss terms, their coefficients and denominators, and
-        optimizer diagnostics.
+      quote: Training writes schema-versioned JSON Lines records by appending complete records
+        and synchronizing them to disk. Every event identifies its run, completed step, resolved-configuration
+        digest, and selected algorithm. Shared records retain rollout counts, verifier reward
+        components, shaping diagnostics, sampling settings, and optimizer diagnostics. GRPO
+        records its policy, divergence, valid-next, and zero-variance metrics; PPO additionally
+        records value loss, entropy, clip fraction, explained variance, and their coefficients.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
-        code_anchor: 019ff566-c44f-7b91-beca-283170025cd8
+        code_anchor: 01a014d0-55f4-7d37-818c-99aee7221422
         selector:
           quote: |-
             def training_evidence_payload(
                 batch: TrainingProblemBatch,
                 rollouts: Sequence[Rollout],
-                update: UpdateMetrics,
+                update: UpdateMetrics | PPOMetrics,
                 configuration: RunConfiguration,
             ) -> dict[str, object]:
                 count = len(rollouts)
+                mean_reward = {
+                    f"mean_{name}": _mean(
+                        [getattr(rollout.reward, name) for rollout in rollouts]
+                    )
+                    for name in (
+                        "base_reward",
+                        "reasoning_coverage",
+                        "sterile_repetition_rate_all",
+                        "sterile_repetition_rate_off_answer",
+                        "sterile_repetition_penalty",
+                        "total_reward",
+                    )
+                }
+                optimizer_metrics: dict[str, object]
+                if isinstance(update, PPOMetrics):
+                    optimizer_metrics = {
+                        "policy_loss": update.policy_loss,
+                        "value_loss": update.value_loss,
+                        "entropy": update.entropy,
+                        "sampled_kl": update.sampled_kl,
+                        "valid_next_loss": update.valid_loss,
+                        "valid_next_mass": update.valid_mass,
+                        "clip_fraction": update.clip_fraction,
+                        "explained_variance": update.explained_variance,
+                        "total_loss": update.total_loss,
+                        "gradient_norm": update.gradient_norm,
+                        "value_coefficient": configuration.ppo.value_coefficient,
+                        "entropy_coefficient": configuration.ppo.entropy_coefficient,
+                        "kl_coefficient": configuration.ppo.kl_coefficient,
+                        "valid_coefficient": configuration.ppo.valid_coefficient,
+                    }
+                else:
+                    optimizer_metrics = {
+                        "policy_loss": update.policy_loss,
+                        "sampled_kl": update.sampled_kl,
+                        "valid_next_loss": update.valid_loss,
+                        "valid_next_mass": update.valid_mass,
+                        "total_loss": update.total_loss,
+                        "zero_variance_group_fraction": update.zero_variance_group_fraction,
+                        "gradient_norm": update.gradient_norm,
+                        "kl_coefficient": configuration.grpo.kl_coefficient,
+                        "valid_coefficient": configuration.grpo.valid_coefficient,
+                    }
+                return {
+                    "algorithm": configuration.algorithm,
+                    "frontier": batch.frontier,
+                    "problem_count": len(batch.examples),
+                    "rollout_count": count,
+                    "stage_probabilities": list(batch.stage_probabilities),
+                    "stage_counts": list(batch.stage_counts),
+                    "format_successes": sum(rollout.outcome.format_ok for rollout in rollouts),
+                    "valid_path_successes": sum(
+                        rollout.outcome.valid_path for rollout in rollouts
+                    ),
+                    "shortest_path_successes": sum(
+                        rollout.outcome.shortest for rollout in rollouts
+                    ),
+                    **mean_reward,
+                    "coverage_coefficient": configuration.reward.coverage_coefficient,
+                    "sterile_repetition_coefficient": (
+                        configuration.reward.sterile_repetition_coefficient
+                    ),
+                    "sterile_repetition_mode": configuration.reward.sterile_repetition_mode,
+                    "minimum_reason_tokens": configuration.minimum_reason_tokens,
+                    "sampling": _plain_data(configuration.rollout),
+                    **optimizer_metrics,
+                }
   - id: 019ff5c5-0a59-79cf-b700-8f337618ed45
     selector:
-      quote: |-
-        For sterile-repetition shaping, training and representative-completion evidence
-        retains both the all-transition and off-answer rates, the selected mode and
-        coefficient, and the resulting applied penalty. Both diagnostics remain present
-        when the coefficient is zero or only one mode affects reward.
+      quote: For sterile-repetition shaping, training and representative-completion evidence
+        retains both the all-transition and off-answer rates, the selected mode and coefficient,
+        and the resulting applied penalty. Both diagnostics remain present when the coefficient
+        is zero or only one mode affects reward.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -236,12 +284,11 @@ anchors:
           quote: '"sterile_repetition_rate_all",'
   - id: 019ff566-c44f-7597-9c52-dc3c295adf25
     selector:
-      quote: |-
-        Independent evaluation records retain the policy identity, graph-problem and
-        problem-set identities, sampling protocol, declared minimum-reasoning
-        requirement, and exact format, valid-path, and shortest-path counts and rates.
-        Curriculum decisions and reference-policy updates are distinct lifecycle events
-        rather than being inferred from nearby measurements.
+      quote: Independent evaluation records retain the policy identity, graph-problem and
+        problem-set identities, sampling protocol, declared minimum-reasoning requirement,
+        and exact format, valid-path, and shortest-path counts and rates. Curriculum decisions
+        and reference-policy updates are distinct lifecycle events rather than being inferred
+        from nearby measurements.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -261,12 +308,11 @@ anchors:
                 }
   - id: 019ff566-c44f-7ef0-a745-bc5f99e67f33
     selector:
-      quote: |-
-        At the declared interval, representative completions are selected by taking the
-        first sampled completion for each of the first declared number of problems.
-        Each record preserves graph and query semantics, prompt and completion tokens
-        and text, parsed and verified facts, and separate reward components. This
-        deterministic rule does not select examples by success.
+      quote: At the declared interval, representative completions are selected by taking the
+        first sampled completion for each of the first declared number of problems. Each record
+        preserves graph and query semantics, prompt and completion tokens and text, parsed
+        and verified facts, and separate reward components. This deterministic rule does not
+        select examples by success.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -278,10 +324,9 @@ anchors:
                             ]
   - id: 019ff566-c44f-739d-a37e-3558ed9cab23
     selector:
-      quote: |-
-        Configuration comparison recursively reports stable field paths whose values
-        differ. It exposes experimental differences without deciding that the
-        corresponding evidence is scientifically comparable.
+      quote: Configuration comparison recursively reports stable field paths whose values
+        differ. It exposes experimental differences without deciding that the corresponding
+        evidence is scientifically comparable.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual

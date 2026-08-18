@@ -115,20 +115,100 @@ covers:
             def _initialize(module: nn.Module) -> None:
                 if isinstance(module, (nn.Linear, nn.Embedding)):
                     nn.init.normal_(module.weight, mean=0.0, std=0.02)
-anchors:
-  - id: 019ff180-b61f-73ca-9e55-e6b45cbf06a4
+  - path: src/pure_rl_shortest_path/model.py
     selector:
-      quote: |-
-        The transformer configuration declares positive vocabulary, context, model,
-        layer, attention-head, and feed-forward dimensions together with positive
-        rotary-position and normalization constants. Model width is divisible by the
-        head count, and each attention-head dimension is even so rotary positions are
-        well-defined. Construction rejects a configuration that violates these
-        relationships.
+      quote: |2-
+            def forward_with_hidden_states(
+                self,
+                input_ids: torch.Tensor,
+                attention_mask: torch.Tensor | None = None,
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                """Score a full prefix and expose normalized states for a value head."""
+
+                if input_ids.ndim != 2 or input_ids.shape[1] == 0:
+                    raise ValueError("input_ids must have shape [batch, positive_length]")
+                batch, length = input_ids.shape
+                if length > self.config.max_context_length:
+                    raise ValueError("effective prefix exceeds max_context_length")
+                if attention_mask is not None and attention_mask.shape != (batch, length):
+                    raise ValueError(
+                        "attention_mask must have shape [batch, effective_prefix_length]"
+                    )
+                hidden = self.embedding(input_ids)
+                for block in self.blocks:
+                    hidden, _ = block(hidden, attention_mask=attention_mask)
+                hidden = self.final_norm(hidden)
+                return self.lm_head(hidden), hidden
+anchors:
+  - id: 019ff180-b61f-7e52-94d5-1cb458cfeb48
+    selector:
+      quote: The model uses token embeddings, pre-normalized causal self-attention with rotary
+        positions, gated SiLU feed-forward blocks, final RMS normalization, and a tied full-vocabulary
+        output. Ordinary actor scoring retains its logits-and-cache interface. A separate
+        full-prefix training operation returns the identical actor logits together with the
+        final normalized tensor supplied to the language-model head, allowing a value head
+        without changing sampling or evaluation.
     links:
       - path: src/pure_rl_shortest_path/model.py
         kind: contractual
-        code_anchor: 019ff180-b61f-7350-8aba-938330524e42
+        code_anchor: 01a014d0-54e2-7921-9095-4c54a103eb86
+        selector:
+          quote: |2-
+                def forward_with_hidden_states(
+                    self,
+                    input_ids: torch.Tensor,
+                    attention_mask: torch.Tensor | None = None,
+                ) -> tuple[torch.Tensor, torch.Tensor]:
+                    """Score a full prefix and expose normalized states for a value head."""
+
+                    if input_ids.ndim != 2 or input_ids.shape[1] == 0:
+                        raise ValueError("input_ids must have shape [batch, positive_length]")
+                    batch, length = input_ids.shape
+                    if length > self.config.max_context_length:
+                        raise ValueError("effective prefix exceeds max_context_length")
+                    if attention_mask is not None and attention_mask.shape != (batch, length):
+                        raise ValueError(
+                            "attention_mask must have shape [batch, effective_prefix_length]"
+                        )
+                    hidden = self.embedding(input_ids)
+                    for block in self.blocks:
+                        hidden, _ = block(hidden, attention_mask=attention_mask)
+                    hidden = self.final_norm(hidden)
+                    return self.lm_head(hidden), hidden
+  - id: 019ff180-b61f-7dc1-a57a-616a73fd5f45
+    selector:
+      quote: Linear and embedding matrices are initialized from the declared zero-mean normal
+        distribution, RMS scales begin at one, and construction accepts no pretrained source.
+        Given the same configuration and Torch random state, construction produces identical
+        learned parameters.
+    links:
+      - path: src/pure_rl_shortest_path/model.py
+        kind: contractual
+        code_anchor: 01a014d3-64c0-7841-8a57-92c39fad237d
+        selector:
+          quote: |2-
+                def __init__(self, config: TransformerConfig) -> None:
+                    super().__init__()
+                    self.config = config
+                    self.embedding = nn.Embedding(config.vocab_size, config.d_model)
+                    self.blocks = nn.ModuleList(
+                        TransformerBlock(config) for _ in range(config.n_layers)
+                    )
+                    self.final_norm = RMSNorm(config.d_model, config.norm_eps)
+                    self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+                    self.apply(self._initialize)
+                    self.lm_head.weight = self.embedding.weight
+  - id: 019ff180-b61f-73ca-9e55-e6b45cbf06a4
+    selector:
+      quote: The transformer configuration declares positive vocabulary, context, model, layer,
+        attention-head, and feed-forward dimensions together with positive rotary-position
+        and normalization constants. Model width is divisible by the head count, and each
+        attention-head dimension is even so rotary positions are well-defined. Construction
+        rejects a configuration that violates these relationships.
+    links:
+      - path: src/pure_rl_shortest_path/model.py
+        kind: contractual
+        code_anchor: 01a014d5-6aea-7272-948c-978e1443f8af
         selector:
           quote: |-
             @dataclass(frozen=True)
@@ -158,76 +238,3 @@ anchors:
                         raise ValueError("d_model must be divisible by n_heads")
                     if (self.d_model // self.n_heads) % 2:
                         raise ValueError("attention head dimension must be even for rotary positions")
-  - id: 019ff180-b61f-7e52-94d5-1cb458cfeb48
-    selector:
-      quote: |-
-        The model uses token embeddings, pre-normalized causal self-attention with
-        rotary positions, gated SiLU feed-forward blocks, a final RMS normalization,
-        and a full-vocabulary linear output whose weights are tied to the token
-        embeddings. Linear and embedding matrices are sampled from a zero-mean normal
-        distribution with standard deviation 0.02, while RMS normalization scales begin
-        at one. Construction accepts no checkpoint or pretrained parameter source.
-    links:
-      - path: src/pure_rl_shortest_path/model.py
-        kind: contractual
-        code_anchor: 019ff180-b61f-72c4-a9e4-d965c0c9e089
-        selector:
-          quote: |2-
-                def __init__(self, config: TransformerConfig) -> None:
-                    super().__init__()
-                    self.config = config
-                    self.embedding = nn.Embedding(config.vocab_size, config.d_model)
-                    self.blocks = nn.ModuleList(
-                        TransformerBlock(config) for _ in range(config.n_layers)
-                    )
-                    self.final_norm = RMSNorm(config.d_model, config.norm_eps)
-                    self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
-                    self.apply(self._initialize)
-                    self.lm_head.weight = self.embedding.weight
-
-                @staticmethod
-                def _initialize(module: nn.Module) -> None:
-                    if isinstance(module, (nn.Linear, nn.Embedding)):
-                        nn.init.normal_(module.weight, mean=0.0, std=0.02)
-      - path: src/pure_rl_shortest_path/model.py
-        kind: contractual
-        code_anchor: 019ff180-b61f-7d57-9adc-8be9edb0c54a
-        selector:
-          quote: |2-
-                def __init__(self, config: TransformerConfig) -> None:
-                    super().__init__()
-                    self.attention_norm = RMSNorm(config.d_model, config.norm_eps)
-                    self.attention = CausalSelfAttention(config)
-                    self.mlp_norm = RMSNorm(config.d_model, config.norm_eps)
-                    self.gate = nn.Linear(config.d_model, config.mlp_dim, bias=False)
-                    self.up = nn.Linear(config.d_model, config.mlp_dim, bias=False)
-                    self.down = nn.Linear(config.mlp_dim, config.d_model, bias=False)
-  - id: 019ff180-b61f-7dc1-a57a-616a73fd5f45
-    selector:
-      quote: |-
-        Given the same configuration and Torch random-generator state, construction
-        produces identical learned parameters. The immutable configuration and model
-        state dictionary provide the architecture and parameter identity needed by
-        checkpoint and experiment records.
-    links:
-      - path: src/pure_rl_shortest_path/model.py
-        kind: contractual
-        code_anchor: 019ff180-b61f-7943-be82-240fb703d387
-        selector:
-          quote: |2-
-                def __init__(self, config: TransformerConfig) -> None:
-                    super().__init__()
-                    self.config = config
-                    self.embedding = nn.Embedding(config.vocab_size, config.d_model)
-                    self.blocks = nn.ModuleList(
-                        TransformerBlock(config) for _ in range(config.n_layers)
-                    )
-                    self.final_norm = RMSNorm(config.d_model, config.norm_eps)
-                    self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
-                    self.apply(self._initialize)
-                    self.lm_head.weight = self.embedding.weight
-
-                @staticmethod
-                def _initialize(module: nn.Module) -> None:
-                    if isinstance(module, (nn.Linear, nn.Embedding)):
-                        nn.init.normal_(module.weight, mean=0.0, std=0.02)

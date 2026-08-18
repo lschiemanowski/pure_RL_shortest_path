@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING, asdict, dataclass, fields, is_dataclass, replace
+from dataclasses import (
+    MISSING,
+    asdict,
+    dataclass,
+    field,
+    fields,
+    is_dataclass,
+    replace,
+)
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -38,6 +46,7 @@ from .experiment import (
     run_evaluation,
 )
 from .model import Transformer, TransformerConfig
+from .ppo import PPOConfig, PPOMetrics, ValueHead, ppo_update, prepare_ppo_batch
 from .rl import (
     GRPOConfig,
     Rollout,
@@ -304,6 +313,8 @@ class RunConfiguration:
     evaluation: EvaluationScheduleConfig
     artifacts: ArtifactConfig
     runtime: RuntimeConfig
+    algorithm: Literal["grpo", "ppo"] = "grpo"
+    ppo: PPOConfig = field(default_factory=PPOConfig)
 
     def __post_init__(self) -> None:
         version = _plain_int(self.schema_version, "schema_version")
@@ -326,7 +337,12 @@ class RunConfiguration:
             raise ConfigurationError(
                 "model vocabulary size must be derived from the task vocabulary"
             )
-        if self.grpo.group_size != self.rollout.group_size:
+        if self.algorithm not in ("grpo", "ppo"):
+            raise ConfigurationError("algorithm must be grpo or ppo")
+        if (
+            self.algorithm == "grpo"
+            and self.grpo.group_size != self.rollout.group_size
+        ):
             raise ConfigurationError(
                 "GRPO group size must equal the rollout comparison-group size"
             )
@@ -422,6 +438,7 @@ def resolve_run_configuration(
     schema_version = root.take("schema_version")
     name = root.take("name")
     seed = root.take("seed")
+    algorithm = root.take("algorithm", "grpo")
 
     task = root.table("task", required=True)
     vocabulary = Vocabulary(task.take("node_label_count"))
@@ -457,6 +474,10 @@ def resolve_run_configuration(
         fixed={"group_size": rollout.group_size},
     )
     optimization.finish()
+
+    ppo_data = root.table("ppo")
+    ppo = ppo_data.build(PPOConfig)
+    ppo_data.finish()
 
     curriculum_data = root.table("curriculum", required=True)
     stages_data = curriculum_data.take("stages")
@@ -518,6 +539,8 @@ def resolve_run_configuration(
         evaluation=evaluation,
         artifacts=artifacts,
         runtime=runtime,
+        algorithm=algorithm,
+        ppo=ppo,
     )
 
 
@@ -782,6 +805,7 @@ def run_configuration_from_record(record: Mapping[str, Any]) -> RunConfiguration
     reward = RewardConfig(**record["reward"])
     optimizer = OptimizerConfig(**record["optimizer"])
     grpo = GRPOConfig(**record["grpo"])
+    ppo = PPOConfig(**record.get("ppo", {}))
     curriculum_data = dict(record["curriculum"])
     curriculum_data["stages"] = tuple(
         GraphProblemConfig(**stage) for stage in curriculum_data["stages"]
@@ -813,6 +837,8 @@ def run_configuration_from_record(record: Mapping[str, Any]) -> RunConfiguration
         evaluation=evaluation,
         artifacts=artifacts,
         runtime=runtime,
+        algorithm=record.get("algorithm", "grpo"),
+        ppo=ppo,
     )
 
 
@@ -962,6 +988,7 @@ def save_training_checkpoint(
     reference: Transformer,
     optimizer: torch.optim.Optimizer,
     random_streams: NamedRandomStreams,
+    value_head: ValueHead | None = None,
 ) -> Path:
     """Atomically preserve all state needed for exact training continuation."""
 
@@ -994,6 +1021,8 @@ def save_training_checkpoint(
         "random_streams": random_streams.state_dict(),
         "torch_rng_state": torch.get_rng_state(),
     }
+    if value_head is not None:
+        payload["value_head"] = value_head.state_dict()
     if torch.cuda.is_available():
         payload["cuda_rng_state"] = torch.cuda.get_rng_state_all()
     if torch.backends.mps.is_available() and hasattr(torch.mps, "get_rng_state"):
@@ -1031,6 +1060,8 @@ def load_training_checkpoint(path: str | Path) -> LoadedCheckpoint:
     if missing:
         raise ValueError(f"checkpoint is missing: {', '.join(missing)}")
     configuration = run_configuration_from_record(payload["configuration"])
+    if configuration.algorithm == "ppo" and "value_head" not in payload:
+        raise ValueError("PPO checkpoint is missing value-head parameters")
     digest = configuration_sha256(configuration)
     if digest != payload["configuration_sha256"]:
         raise ValueError("checkpoint configuration digest is invalid")
@@ -1067,6 +1098,11 @@ def validate_resume_configuration(
 ) -> tuple[str, ...]:
     """Reject incompatible parameter semantics and identify permitted changes."""
 
+    if requested.algorithm != checkpoint.configuration.algorithm:
+        raise ValueError(
+            "requested optimization algorithm is incompatible with checkpoint"
+        )
+
     if requested.vocabulary != checkpoint.configuration.vocabulary:
         raise ValueError("requested task vocabulary is incompatible with checkpoint")
     if (
@@ -1102,12 +1138,15 @@ def restore_training_checkpoint(
     reference: Transformer,
     optimizer: torch.optim.Optimizer,
     random_streams: NamedRandomStreams,
+    value_head: ValueHead | None = None,
 ) -> tuple[CurriculumState, tuple[str, ...]]:
     differences = validate_resume_configuration(
         checkpoint, configuration, derived_run=derived_run
     )
     policy.load_state_dict(checkpoint.payload["policy"])
     reference.load_state_dict(checkpoint.payload["reference"])
+    if value_head is not None:
+        value_head.load_state_dict(checkpoint.payload["value_head"])
     reference.eval()
     for parameter in reference.parameters():
         parameter.requires_grad_(False)
@@ -1178,7 +1217,7 @@ def _mean(values: Sequence[float]) -> float:
 def training_evidence_payload(
     batch: TrainingProblemBatch,
     rollouts: Sequence[Rollout],
-    update: UpdateMetrics,
+    update: UpdateMetrics | PPOMetrics,
     configuration: RunConfiguration,
 ) -> dict[str, object]:
     count = len(rollouts)
@@ -1195,7 +1234,38 @@ def training_evidence_payload(
             "total_reward",
         )
     }
+    optimizer_metrics: dict[str, object]
+    if isinstance(update, PPOMetrics):
+        optimizer_metrics = {
+            "policy_loss": update.policy_loss,
+            "value_loss": update.value_loss,
+            "entropy": update.entropy,
+            "sampled_kl": update.sampled_kl,
+            "valid_next_loss": update.valid_loss,
+            "valid_next_mass": update.valid_mass,
+            "clip_fraction": update.clip_fraction,
+            "explained_variance": update.explained_variance,
+            "total_loss": update.total_loss,
+            "gradient_norm": update.gradient_norm,
+            "value_coefficient": configuration.ppo.value_coefficient,
+            "entropy_coefficient": configuration.ppo.entropy_coefficient,
+            "kl_coefficient": configuration.ppo.kl_coefficient,
+            "valid_coefficient": configuration.ppo.valid_coefficient,
+        }
+    else:
+        optimizer_metrics = {
+            "policy_loss": update.policy_loss,
+            "sampled_kl": update.sampled_kl,
+            "valid_next_loss": update.valid_loss,
+            "valid_next_mass": update.valid_mass,
+            "total_loss": update.total_loss,
+            "zero_variance_group_fraction": update.zero_variance_group_fraction,
+            "gradient_norm": update.gradient_norm,
+            "kl_coefficient": configuration.grpo.kl_coefficient,
+            "valid_coefficient": configuration.grpo.valid_coefficient,
+        }
     return {
+        "algorithm": configuration.algorithm,
         "frontier": batch.frontier,
         "problem_count": len(batch.examples),
         "rollout_count": count,
@@ -1214,17 +1284,9 @@ def training_evidence_payload(
             configuration.reward.sterile_repetition_coefficient
         ),
         "sterile_repetition_mode": configuration.reward.sterile_repetition_mode,
-        "policy_loss": update.policy_loss,
-        "sampled_kl": update.sampled_kl,
-        "valid_next_loss": update.valid_loss,
-        "valid_next_mass": update.valid_mass,
-        "total_loss": update.total_loss,
-        "kl_coefficient": configuration.grpo.kl_coefficient,
-        "valid_coefficient": configuration.grpo.valid_coefficient,
         "minimum_reason_tokens": configuration.minimum_reason_tokens,
-        "zero_variance_group_fraction": update.zero_variance_group_fraction,
-        "gradient_norm": update.gradient_norm,
         "sampling": _plain_data(configuration.rollout),
+        **optimizer_metrics,
     }
 
 
@@ -1305,6 +1367,7 @@ def _build_training_components(
 ) -> tuple[
     Transformer,
     Transformer,
+    ValueHead | None,
     torch.optim.AdamW,
     NamedRandomStreams,
 ]:
@@ -1314,14 +1377,22 @@ def _build_training_components(
     policy = Transformer(configuration.model).to(device)
     reference = Transformer(configuration.model).to(device)
     snapshot_reference(reference, policy)
+    value_head = (
+        ValueHead(configuration.model.d_model).to(device)
+        if configuration.algorithm == "ppo"
+        else None
+    )
+    parameters = [*policy.parameters()]
+    if value_head is not None:
+        parameters.extend(value_head.parameters())
     optimizer = torch.optim.AdamW(
-        policy.parameters(),
+        parameters,
         lr=configuration.optimizer.learning_rate,
         betas=(configuration.optimizer.beta1, configuration.optimizer.beta2),
         weight_decay=configuration.optimizer.weight_decay,
     )
     streams = create_random_streams(seeds)
-    return policy, reference, optimizer, streams
+    return policy, reference, value_head, optimizer, streams
 
 
 def _apply_optimizer_configuration(
@@ -1357,8 +1428,8 @@ def execute_training(
     selected_device = resolve_runtime_device(configuration.runtime.device)
     device = torch.device(selected_device)
     autocast_dtype = resolve_autocast_dtype(configuration.runtime.dtype, device)
-    policy, reference, optimizer, streams = _build_training_components(
-        configuration, device=device, seeds=seeds
+    policy, reference, value_head, optimizer, streams = (
+        _build_training_components(configuration, device=device, seeds=seeds)
     )
     step = 0
     curriculum_state = CurriculumState()
@@ -1372,6 +1443,7 @@ def execute_training(
             reference=reference,
             optimizer=optimizer,
             random_streams=streams,
+            value_head=value_head,
         )
         _apply_optimizer_configuration(optimizer, configuration.optimizer)
         step = checkpoint.step
@@ -1409,6 +1481,7 @@ def execute_training(
             reference=reference,
             optimizer=optimizer,
             random_streams=streams,
+            value_head=value_head,
         )
 
     latest_checkpoint: Path | None = checkpoint.path if checkpoint else None
@@ -1457,14 +1530,33 @@ def execute_training(
                 device=device,
                 minimum_reason_tokens=configuration.minimum_reason_tokens,
             )
-            update = grpo_update(
-                policy,
-                reference,
-                optimizer,
-                packed,
-                configuration.grpo,
-                autocast_dtype=autocast_dtype,
-            )
+            if configuration.algorithm == "grpo":
+                update: UpdateMetrics | PPOMetrics = grpo_update(
+                    policy,
+                    reference,
+                    optimizer,
+                    packed,
+                    configuration.grpo,
+                    autocast_dtype=autocast_dtype,
+                )
+            else:
+                assert value_head is not None
+                ppo_batch = prepare_ppo_batch(
+                    policy,
+                    value_head,
+                    packed,
+                    configuration.ppo,
+                    autocast_dtype=autocast_dtype,
+                )
+                update = ppo_update(
+                    policy,
+                    value_head,
+                    reference,
+                    optimizer,
+                    ppo_batch,
+                    configuration.ppo,
+                    autocast_dtype=autocast_dtype,
+                )
             step += 1
 
             if step % configuration.training.reference_update_every == 0:

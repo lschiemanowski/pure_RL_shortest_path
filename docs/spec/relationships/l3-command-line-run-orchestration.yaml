@@ -23,19 +23,15 @@ covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
-            def save_checkpoint(purpose: CheckpointPurpose) -> Path:
-                return save_training_checkpoint(
-                    Path(run_directory),
-                    run_id=run_id,
-                    purpose=purpose,
-                    step=step,
-                    curriculum_state=curriculum_state,
-                    configuration=configuration,
-                    policy=policy,
-                    reference=reference,
-                    optimizer=optimizer,
-                    random_streams=streams,
-                )
+            def defer_sigint(_signum: int, _frame: object) -> None:
+                nonlocal interrupt_requested
+                if interrupt_requested:
+                    raise KeyboardInterrupt
+                interrupt_requested = True
+
+            if threading.current_thread() is threading.main_thread():
+                previous_sigint = signal.getsignal(signal.SIGINT)
+                signal.signal(signal.SIGINT, defer_sigint)
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
@@ -68,15 +64,33 @@ covers:
                         device=device,
                         minimum_reason_tokens=configuration.minimum_reason_tokens,
                     )
-                    update = grpo_update(
-                        policy,
-                        reference,
-                        optimizer,
-                        packed,
-                        configuration.grpo,
-                        autocast_dtype=autocast_dtype,
-                    )
-                    step += 1
+                    if configuration.algorithm == "grpo":
+                        update: UpdateMetrics | PPOMetrics = grpo_update(
+                            policy,
+                            reference,
+                            optimizer,
+                            packed,
+                            configuration.grpo,
+                            autocast_dtype=autocast_dtype,
+                        )
+                    else:
+                        assert value_head is not None
+                        ppo_batch = prepare_ppo_batch(
+                            policy,
+                            value_head,
+                            packed,
+                            configuration.ppo,
+                            autocast_dtype=autocast_dtype,
+                        )
+                        update = ppo_update(
+                            policy,
+                            value_head,
+                            reference,
+                            optimizer,
+                            ppo_batch,
+                            configuration.ppo,
+                            autocast_dtype=autocast_dtype,
+                        )
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
@@ -115,18 +129,6 @@ covers:
                             ),
                         )
                         curriculum_state = decision.resulting_state
-  - path: src/pure_rl_shortest_path/run.py
-    selector:
-      quote: |2-
-            def defer_sigint(_signum: int, _frame: object) -> None:
-                nonlocal interrupt_requested
-                if interrupt_requested:
-                    raise KeyboardInterrupt
-                interrupt_requested = True
-
-            if threading.current_thread() is threading.main_thread():
-                previous_sigint = signal.getsignal(signal.SIGINT)
-                signal.signal(signal.SIGINT, defer_sigint)
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
@@ -183,40 +185,17 @@ covers:
                     autocast_dtype=autocast_dtype,
                 )
 anchors:
-  - id: 019ff566-c44f-79e5-adc2-9072dbd49def
-    selector:
-      quote: |-
-        The command line exposes fresh training, checkpoint resumption, and checkpoint
-        evaluation as distinct operations. Fresh training accepts one experiment TOML.
-        Resumption accepts a checkpoint, an optional compatible TOML for an explicitly
-        derived run, and an operational stopping-step override. Evaluation accepts a
-        checkpoint and a separate evaluation TOML. Scientific settings are not
-        duplicated as command-line flags.
-    links:
-      - path: src/pure_rl_shortest_path/__main__.py
-        kind: contractual
-        code_anchor: 019ff566-c44f-78ab-ab76-fd46aeeaf1c5
-        selector:
-          quote: |-
-            def build_parser() -> argparse.ArgumentParser:
-                parser = argparse.ArgumentParser(
-                    prog="pure_rl_shortest_path",
-                    description="Train and evaluate the pure-RL shortest-path policy.",
-                )
-                commands = parser.add_subparsers(dest="command", required=True)
   - id: 019ff566-c44f-7b22-b555-24f24104c691
     selector:
-      quote: |-
-        Each training step samples curriculum problems, collects grouped unconstrained
-        on-policy completions, verifies them and computes reward components, performs
-        the configured GRPO update, and records evidence. Scheduled operations update
-        the frozen reference, retain deterministic representative completions, evaluate
-        fresh current-frontier problems, apply the advancement gate, and create
-        purpose-identified checkpoints.
+      quote: Each training step samples curriculum problems, collects unconstrained on-policy
+        completions, verifies them, and packs sampled actions. The selected algorithm then
+        performs either the existing grouped GRPO update or PPO batch preparation followed
+        by a clipped actor-value update. Scheduled reference refresh, representative completions,
+        actor-only evaluation, curriculum gating, checkpoints, and evidence are shared.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
-        code_anchor: 019ff566-c44f-7f92-a94b-72d2559e34c4
+        code_anchor: 01a014e5-767f-7f7a-8cbe-5ed7f85bac0c
         selector:
           quote: |2-
                         batch = generate_training_problem_batch(
@@ -234,15 +213,54 @@ anchors:
                             generator=streams.rollout_sampling,
                             autocast_dtype=autocast_dtype,
                         )
+                        rollouts = evaluate_samples(
+                            samples,
+                            configuration.vocabulary,
+                            configuration.reward.coverage_coefficient,
+                            configuration.reward.sterile_repetition_coefficient,
+                            configuration.reward.sterile_repetition_mode,
+                            configuration.minimum_reason_tokens,
+                        )
+                        packed = pack_rollouts(
+                            rollouts,
+                            configuration.vocabulary,
+                            device=device,
+                            minimum_reason_tokens=configuration.minimum_reason_tokens,
+                        )
+                        if configuration.algorithm == "grpo":
+                            update: UpdateMetrics | PPOMetrics = grpo_update(
+                                policy,
+                                reference,
+                                optimizer,
+                                packed,
+                                configuration.grpo,
+                                autocast_dtype=autocast_dtype,
+                            )
+                        else:
+                            assert value_head is not None
+                            ppo_batch = prepare_ppo_batch(
+                                policy,
+                                value_head,
+                                packed,
+                                configuration.ppo,
+                                autocast_dtype=autocast_dtype,
+                            )
+                            update = ppo_update(
+                                policy,
+                                value_head,
+                                reference,
+                                optimizer,
+                                ppo_batch,
+                                configuration.ppo,
+                                autocast_dtype=autocast_dtype,
+                            )
   - id: 019ff566-c44f-7765-ac63-b69ec4da0203
     selector:
-      quote: |-
-        Standalone evaluation restores only the selected policy and model
-        configuration. Its TOML declares one or more named graph-problem sets with
-        exact example and generation seeds plus a common greedy or identified
-        stochastic sampling protocol. It writes exact metrics and every completion to a
-        new evaluation directory without constructing an optimizer or mutating the
-        checkpoint.
+      quote: Standalone evaluation restores only the selected actor and model configuration.
+        Its TOML declares one or more named graph-problem sets with exact example and generation
+        seeds plus a common greedy or identified stochastic sampling protocol. It writes exact
+        metrics and every completion to a new evaluation directory without constructing an
+        optimizer or value head and without mutating the checkpoint.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -252,14 +270,31 @@ anchors:
                 policy = Transformer(checkpoint.configuration.model).to(device)
                 policy.load_state_dict(checkpoint.payload["policy"])
                 policy.eval()
+  - id: 019ff566-c44f-79e5-adc2-9072dbd49def
+    selector:
+      quote: The command line exposes fresh training, checkpoint resumption, and checkpoint
+        evaluation as distinct operations. Fresh training accepts one experiment TOML. Resumption
+        accepts a checkpoint, an optional compatible TOML for an explicitly derived run, and
+        an operational stopping-step override. Evaluation accepts a checkpoint and a separate
+        evaluation TOML. Scientific settings are not duplicated as command-line flags.
+    links:
+      - path: src/pure_rl_shortest_path/__main__.py
+        kind: contractual
+        code_anchor: 019ff566-c44f-78ab-ab76-fd46aeeaf1c5
+        selector:
+          quote: |-
+            def build_parser() -> argparse.ArgumentParser:
+                parser = argparse.ArgumentParser(
+                    prog="pure_rl_shortest_path",
+                    description="Train and evaluate the pure-RL shortest-path policy.",
+                )
+                commands = parser.add_subparsers(dest="command", required=True)
   - id: 019ff564-feee-766e-a0a7-dda9c7f5bfbf
     selector:
-      quote: |-
-        Normal completion writes a final checkpoint and terminal event. A first
-        interrupt is deferred to the next completed-step boundary, which writes an
-        interruption checkpoint and event before propagating the interrupt.
-        The package entry point remains a small dispatcher; experiment semantics and
-        artifact behavior reside in the run implementation.
+      quote: Normal completion writes a final checkpoint and terminal event. A first interrupt
+        is deferred to the next completed-step boundary, which writes an interruption checkpoint
+        and event before propagating the interrupt. The package entry point remains a small
+        dispatcher; experiment semantics and artifact behavior reside in the run implementation.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual

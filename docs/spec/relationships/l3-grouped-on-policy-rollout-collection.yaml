@@ -5,96 +5,6 @@ scope: pure-rl-shortest-path/reinforcement-learning-trainer/rollout-sampling/gro
 realization: implemented
 parent: 019fef85-58fe-7288-8a1c-a95e647a1ef0
 covers:
-  - path: src/pure_rl_shortest_path/rl.py
-    selector:
-      quote: |-
-        @dataclass(frozen=True)
-        class RolloutSamplingConfig:
-            """Sampling parameters for one on-policy training batch."""
-
-            group_size: int
-            max_new_tokens: int
-            generation_batch_size: int | None = None
-            temperature: float = 1.0
-            top_p: float = 1.0
-
-            def __post_init__(self) -> None:
-                for name in ("group_size", "max_new_tokens"):
-                    object.__setattr__(self, name, _positive_int(getattr(self, name), name))
-                batch_size = self.generation_batch_size
-                if batch_size is not None:
-                    batch_size = _positive_int(batch_size, "generation_batch_size")
-                temperature = _nonnegative_real(self.temperature, "temperature")
-                top_p = _nonnegative_real(self.top_p, "top_p")
-                if temperature != 1.0 or top_p != 1.0:
-                    raise ValueError(
-                        "training rollouts require temperature=1 and top_p=1 so samples "
-                        "come from the policy distribution used by GRPO"
-                    )
-                object.__setattr__(self, "generation_batch_size", batch_size)
-                object.__setattr__(self, "temperature", temperature)
-                object.__setattr__(self, "top_p", top_p)
-      prefix: |2+
-         raise ValueError(f"{name} must be finite and nonnegative")
-            return result
-
-
-  - path: src/pure_rl_shortest_path/rl.py
-    selector:
-      quote: |-
-        @torch.no_grad()
-        def collect_grouped_completions(
-            model: Transformer,
-            examples: Sequence[GraphExample],
-            config: RolloutSamplingConfig,
-            *,
-            device: torch.device,
-            generator: torch.Generator | None = None,
-            autocast_dtype: torch.dtype | None = None,
-        ) -> list[SampledCompletion]:
-            """Sample adjacent completion groups without task-specific token constraints."""
-
-            expanded = [
-                (group_id, example)
-                for group_id, example in enumerate(examples)
-                for _ in range(config.group_size)
-            ]
-            generated = generate_tokens(
-                model,
-                [example.prompt for _, example in expanded],
-                max_new_tokens=config.max_new_tokens,
-                batch_size=config.generation_batch_size,
-                pad_token=PAD,
-                eos_token=EOS,
-                device=device,
-                select_next=lambda logits: sample_policy_tokens(logits, generator),
-                autocast_dtype=autocast_dtype,
-            )
-            return [
-                SampledCompletion(
-                    example=example,
-                    completion=completion,
-                    group_id=group_id,
-                    terminated_by_eos=bool(completion and completion[-1] == EOS),
-                )
-                for (group_id, example), completion in zip(expanded, generated)
-            ]
-  - path: src/pure_rl_shortest_path/rl.py
-    selector:
-      quote: |-
-        def sample_policy_tokens(
-            logits: torch.Tensor, generator: torch.Generator | None = None
-        ) -> torch.Tensor:
-            """Draw one categorical action per row from the complete policy softmax."""
-
-            if logits.ndim != 2 or logits.shape[0] == 0 or logits.shape[1] == 0:
-                raise ValueError("logits must have shape [positive_batch, positive_vocabulary]")
-            probabilities = logits.float().softmax(dim=-1)
-            if generator is not None and probabilities.device.type != "cpu":
-                return torch.multinomial(
-                    probabilities.cpu(), 1, generator=generator
-                ).squeeze(1).to(logits.device)
-            return torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
   - path: src/pure_rl_shortest_path/model.py
     selector:
       quote: from collections.abc import Callable, Sequence
@@ -171,57 +81,230 @@ covers:
             finally:
                 model.train(was_training)
             return tuple(generated)
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class RolloutSamplingConfig:
+            """Sampling parameters for one on-policy training batch."""
+
+            group_size: int
+            max_new_tokens: int
+            generation_batch_size: int | None = None
+            temperature: float = 1.0
+            top_p: float = 1.0
+
+            def __post_init__(self) -> None:
+                for name in ("group_size", "max_new_tokens"):
+                    object.__setattr__(self, name, _positive_int(getattr(self, name), name))
+                batch_size = self.generation_batch_size
+                if batch_size is not None:
+                    batch_size = _positive_int(batch_size, "generation_batch_size")
+                temperature = _nonnegative_real(self.temperature, "temperature")
+                top_p = _nonnegative_real(self.top_p, "top_p")
+                if temperature != 1.0 or top_p != 1.0:
+                    raise ValueError(
+                        "training rollouts require temperature=1 and top_p=1 so samples "
+                        "come from the policy distribution used by GRPO"
+                    )
+                object.__setattr__(self, "generation_batch_size", batch_size)
+                object.__setattr__(self, "temperature", temperature)
+                object.__setattr__(self, "top_p", top_p)
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        @dataclass(frozen=True)
+        class SampledCompletion:
+            example: GraphExample
+            completion: tuple[int, ...]
+            group_id: int
+            terminated_by_eos: bool
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        def sample_policy_tokens(
+            logits: torch.Tensor, generator: torch.Generator | None = None
+        ) -> torch.Tensor:
+            """Draw one categorical action per row from the complete policy softmax."""
+
+            if logits.ndim != 2 or logits.shape[0] == 0 or logits.shape[1] == 0:
+                raise ValueError("logits must have shape [positive_batch, positive_vocabulary]")
+            probabilities = logits.float().softmax(dim=-1)
+            if generator is not None and probabilities.device.type != "cpu":
+                return torch.multinomial(
+                    probabilities.cpu(), 1, generator=generator
+                ).squeeze(1).to(logits.device)
+            return torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
+  - path: src/pure_rl_shortest_path/rl.py
+    selector:
+      quote: |-
+        @torch.no_grad()
+        def collect_grouped_completions(
+            model: Transformer,
+            examples: Sequence[GraphExample],
+            config: RolloutSamplingConfig,
+            *,
+            device: torch.device,
+            generator: torch.Generator | None = None,
+            autocast_dtype: torch.dtype | None = None,
+        ) -> list[SampledCompletion]:
+            """Sample adjacent completion groups without task-specific token constraints."""
+
+            expanded = [
+                (group_id, example)
+                for group_id, example in enumerate(examples)
+                for _ in range(config.group_size)
+            ]
+            generated = generate_tokens(
+                model,
+                [example.prompt for _, example in expanded],
+                max_new_tokens=config.max_new_tokens,
+                batch_size=config.generation_batch_size,
+                pad_token=PAD,
+                eos_token=EOS,
+                device=device,
+                select_next=lambda logits: sample_policy_tokens(logits, generator),
+                autocast_dtype=autocast_dtype,
+            )
+            return [
+                SampledCompletion(
+                    example=example,
+                    completion=completion,
+                    group_id=group_id,
+                    terminated_by_eos=bool(completion and completion[-1] == EOS),
+                )
+                for (group_id, example), completion in zip(expanded, generated)
+            ]
 anchors:
   - id: 019ff1b1-fc75-7690-9e65-2345ea4e15cc
     selector:
-      quote: |-
-        For each supplied training problem, the fixed current policy generates \(K\)
-        independent completions. Those completions are retained adjacently as one
-        comparison group, and no parameter update occurs until collection of the whole
-        rollout batch is complete.
-    links:
-      - id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
-        kind: informational
-  - id: 019ff1ac-85fb-739a-a978-d3605f4a97e3
-    selector:
-      quote: |-
-        At every generated position, the next token is sampled categorically from the
-        complete softmax of the current policy's raw full-vocabulary logits. Training
-        requires temperature one and top-p one; the configuration rejects values that
-        would rescale or truncate this distribution. Sampling applies no graph-legality
-        mask, forced delimiter, verifier intervention, or post-hoc token edit. A
-        completion ends only when it samples the termination symbol or exhausts the
-        declared maximum length; reaching the length limit does not append an artificial
-        termination symbol.
+      quote: For each supplied training problem, the fixed current actor generates the configured
+        number of independent completions before any parameter update. GRPO retains adjacent
+        completions as one comparison group; PPO treats them as independent trajectories even
+        when execution keeps them adjacent.
     links:
       - path: src/pure_rl_shortest_path/rl.py
         kind: contractual
-        code_anchor: 019ff1ac-85fb-7c55-9846-833b494cd4e9
+        code_anchor: 01a014d0-5600-742e-8521-978e26e8661c
         selector:
-          quote: |2-
+          quote: |-
+            @torch.no_grad()
+            def collect_grouped_completions(
+                model: Transformer,
+                examples: Sequence[GraphExample],
+                config: RolloutSamplingConfig,
+                *,
+                device: torch.device,
+                generator: torch.Generator | None = None,
+                autocast_dtype: torch.dtype | None = None,
+            ) -> list[SampledCompletion]:
+                """Sample adjacent completion groups without task-specific token constraints."""
+
+                expanded = [
+                    (group_id, example)
+                    for group_id, example in enumerate(examples)
+                    for _ in range(config.group_size)
+                ]
+                generated = generate_tokens(
+                    model,
+                    [example.prompt for _, example in expanded],
+                    max_new_tokens=config.max_new_tokens,
+                    batch_size=config.generation_batch_size,
+                    pad_token=PAD,
+                    eos_token=EOS,
+                    device=device,
+                    select_next=lambda logits: sample_policy_tokens(logits, generator),
+                    autocast_dtype=autocast_dtype,
+                )
+                return [
+                    SampledCompletion(
+                        example=example,
+                        completion=completion,
+                        group_id=group_id,
+                        terminated_by_eos=bool(completion and completion[-1] == EOS),
+                    )
+                    for (group_id, example), completion in zip(expanded, generated)
+                ]
+  - id: 019ff1ac-85fb-739a-a978-d3605f4a97e3
+    selector:
+      quote: At every generated position, the next token is sampled categorically from the
+        complete softmax of the current actor's raw full-vocabulary logits. Training requires
+        temperature one and top-p one; the configuration rejects values that would rescale
+        or truncate this distribution. Sampling applies no graph-legality mask, forced delimiter,
+        verifier intervention, or post-hoc token edit. A completion ends only when it samples
+        the termination symbol or exhausts the declared maximum length; reaching the length
+        limit does not append an artificial termination symbol.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 01a014d0-560b-7565-b1e0-ac9c358e7062
+        selector:
+          quote: |-
+            @dataclass(frozen=True)
+            class RolloutSamplingConfig:
+                """Sampling parameters for one on-policy training batch."""
+
+                group_size: int
+                max_new_tokens: int
+                generation_batch_size: int | None = None
+                temperature: float = 1.0
+                top_p: float = 1.0
+
+                def __post_init__(self) -> None:
+                    for name in ("group_size", "max_new_tokens"):
+                        object.__setattr__(self, name, _positive_int(getattr(self, name), name))
+                    batch_size = self.generation_batch_size
+                    if batch_size is not None:
+                        batch_size = _positive_int(batch_size, "generation_batch_size")
+                    temperature = _nonnegative_real(self.temperature, "temperature")
+                    top_p = _nonnegative_real(self.top_p, "top_p")
                     if temperature != 1.0 or top_p != 1.0:
                         raise ValueError(
                             "training rollouts require temperature=1 and top_p=1 so samples "
                             "come from the policy distribution used by GRPO"
                         )
-  - id: 019ff1ac-85fb-7c0b-97cb-4e2edd839e65
-    selector:
-      quote: |-
-        Each retained sample identifies its problem, comparison group, exact completion
-        tokens, and whether termination was sampled. Batching, left padding, causal
-        attention caching, and seeded categorical sampling may alter execution but not
-        the defined distribution or group order.
-    links:
-      - path: src/pure_rl_shortest_path/model.py
-        kind: contractual
-        code_anchor: 019ff6c7-c15e-7781-929f-931b38aa1ada
-        selector:
-          quote: done |= selected.eq(eos_token)
+                    object.__setattr__(self, "generation_batch_size", batch_size)
+                    object.__setattr__(self, "temperature", temperature)
+                    object.__setattr__(self, "top_p", top_p)
       - path: src/pure_rl_shortest_path/rl.py
         kind: contractual
-        code_anchor: 019ff1ac-85fb-7515-b411-89dc830a00e8
+        code_anchor: 01a014d0-5617-7566-bd1b-2910bf6c05d1
         selector:
-          quote: terminated_by_eos=bool(completion and completion[-1] == EOS),
+          quote: |-
+            def sample_policy_tokens(
+                logits: torch.Tensor, generator: torch.Generator | None = None
+            ) -> torch.Tensor:
+                """Draw one categorical action per row from the complete policy softmax."""
+
+                if logits.ndim != 2 or logits.shape[0] == 0 or logits.shape[1] == 0:
+                    raise ValueError("logits must have shape [positive_batch, positive_vocabulary]")
+                probabilities = logits.float().softmax(dim=-1)
+                if generator is not None and probabilities.device.type != "cpu":
+                    return torch.multinomial(
+                        probabilities.cpu(), 1, generator=generator
+                    ).squeeze(1).to(logits.device)
+                return torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
+  - id: 019ff1ac-85fb-7c0b-97cb-4e2edd839e65
+    selector:
+      quote: Each retained sample identifies its problem, group position, exact completion
+        tokens, and whether termination was sampled. After verification and packing, PPO snapshots
+        detached action log probabilities and scalar values before its first optimization
+        epoch. Batching, left padding, causal attention caching, and seeded categorical sampling
+        may alter execution but not the defined distribution or sample order.
+    links:
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 01a014d0-5622-7620-85a1-b2fff893ecfd
+        selector:
+          quote: |-
+            @dataclass(frozen=True)
+            class SampledCompletion:
+                example: GraphExample
+                completion: tuple[int, ...]
+                group_id: int
+                terminated_by_eos: bool
+      - id: 01a0149f-9d0d-7068-bbe4-09e4cf655e50
+        kind: informational
 references:
   - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
     kind: contractual

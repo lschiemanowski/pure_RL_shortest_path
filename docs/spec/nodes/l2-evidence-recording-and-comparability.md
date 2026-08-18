@@ -1,22 +1,7 @@
 # Evidence recording and comparability
 
-Each run retains its resolved configuration and provenance, an append-only
-sequence of training and evaluation metric records, checkpoints, logs, and
-representative completions. Metric and completion records identify the run,
-training step, curriculum position, policy checkpoint, problem distribution,
-and evaluation or training protocol under which they were produced.
+Each run retains its resolved configuration and provenance, including the selected optimization algorithm, an append-only sequence of training and evaluation metric records, checkpoints, logs, and representative completions. Metric and completion records identify the run, training step, curriculum position, policy checkpoint, problem distribution, and evaluation or training protocol under which they were produced.
 
-Learning signals remain auditable in the evidence: verifier reward, each
-shaping term, auxiliary-objective contribution, and their configured
-coefficients are recorded separately where applicable. Aggregate metrics retain
-their denominators, and representative completions preserve enough of the
-graph, query, generated tokens, parsed result, and verifier facts to explain how
-the reported outcome was obtained.
+Learning signals remain auditable in the evidence: verifier reward, each shaping term, auxiliary-objective contribution, and their configured coefficients are recorded separately where applicable. PPO records its policy, value, entropy, clipping, divergence, explained-variance, and gradient metrics separately from GRPO metrics. Aggregate metrics retain their denominators, and representative completions preserve enough of the graph, query, generated tokens, parsed result, and verifier facts to explain how the reported outcome was obtained.
 
-Evidence records expose the task semantics, graph scale, curriculum position,
-policy architecture, training duration, sampling protocol, reward shaping, and
-auxiliary objectives needed to judge whether results are comparable. Analysis
-or reporting that combines runs identifies relevant differences rather than
-silently pooling incompatible evidence. The training environment records this
-information but does not itself decide which scientific comparisons are
-appropriate.
+Evidence records expose the task semantics, graph scale, curriculum position, policy architecture, training duration, optimization algorithm, sampling protocol, reward shaping, and auxiliary objectives needed to judge whether results are comparable. Analysis or reporting that combines runs identifies relevant differences rather than silently pooling incompatible evidence. The training environment records this information but does not itself decide which scientific comparisons are appropriate.

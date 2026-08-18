@@ -7,26 +7,22 @@ parent: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
 anchors:
   - id: 019fec29-efaa-706f-b3d3-cb90a6cb2a14
     selector:
-      quote: |-
-        A transformer configuration declares the vocabulary size, context limit, model
-        width, layer count, attention-head count, feed-forward width, rotary-position
-        base, and normalization tolerance of a decoder-only causal model. Construction
-        validates the dimensional relationships required by the declared architecture
-        and rejects incompatible configurations.
+      quote: A transformer configuration declares the vocabulary size, context limit, model
+        width, layer count, attention-head count, feed-forward width, rotary-position base,
+        and normalization tolerance of a decoder-only causal model. Construction validates
+        the dimensional relationships required by the declared architecture and rejects incompatible
+        configurations.
     links:
       - id: 019ff180-b61e-7c0a-b65b-28fe5c15b11f
         kind: informational
   - id: 019fec29-efaa-74c7-b873-5414cd5ea165
     selector:
-      quote: |-
-        Construction creates token embeddings, causal transformer blocks, and
-        full-vocabulary output scores, and initializes every learned parameter from
-        scratch without loading pretrained weights. Learned matrices use declared
-        random initialization while normalization scales use declared fixed initial
-        values. Given the same configuration and random state, initialization is
-        reproducible. The declared configuration and resulting learned parameters
-        together identify the transformer model supplied to the surrounding training
-        and checkpoint workflows.
+      quote: Construction creates token embeddings, causal transformer blocks, final normalization,
+        and full-vocabulary output scores, and initializes every learned parameter from scratch
+        without loading pretrained weights. The forward operation may return the same final
+        normalized token representations used by the language-model head when a training-only
+        auxiliary head requests them; ordinary actor scoring omits them. Given the same configuration
+        and random state, initialization is reproducible.
     links:
       - id: 019ff180-b61e-7c0a-b65b-28fe5c15b11f
         kind: informational

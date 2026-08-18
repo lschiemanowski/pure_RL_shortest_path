@@ -191,24 +191,6 @@ covers:
                 (directory / "source.patch").write_bytes(source.patch)
             return InitializedRun(directory, configuration, provenance)
 anchors:
-  - id: 019ff54c-87f7-790b-b892-7c37e15f6ca1
-    selector:
-      quote: |-
-        A fresh run receives a stable run identifier and a new artifact directory. Its
-        provenance record contains the source and resolved-configuration digests, source
-        revision and source-tree status, start time, relevant Python and PyTorch
-        versions, requested and selected device, numerical precision, and exact launch
-        command. Starting a fresh run in an existing run directory is rejected.
-    links:
-      - path: src/pure_rl_shortest_path/run.py
-        kind: contractual
-        code_anchor: 019ff54c-87f7-719c-8e7b-34b83ef7c1e5
-        selector:
-          quote: |2-
-                output_root = configuration.resolved.artifacts.output_root
-                output_root.mkdir(parents=True, exist_ok=True)
-                directory = output_root / directory_name
-                directory.mkdir(exist_ok=False)
   - id: 019ff54c-87f7-72e1-8f31-e86875f1ded8
     selector:
       quote: |-
@@ -257,6 +239,24 @@ anchors:
           quote: |2-
                 if source.patch:
                     (directory / "source.patch").write_bytes(source.patch)
+  - id: 019ff54c-87f7-790b-b892-7c37e15f6ca1
+    selector:
+      quote: |-
+        A fresh run receives a stable run identifier and a new artifact directory. Its
+        provenance record contains the source and resolved-configuration digests, source
+        revision and source-tree status, start time, relevant Python and PyTorch
+        versions, requested and selected device, numerical precision, and exact launch
+        command. Starting a fresh run in an existing run directory is rejected. The selected optimization algorithm remains part of the resolved configuration used to identify the run.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff54c-87f7-719c-8e7b-34b83ef7c1e5
+        selector:
+          quote: |2-
+                output_root = configuration.resolved.artifacts.output_root
+                output_root.mkdir(parents=True, exist_ok=True)
+                directory = output_root / directory_name
+                directory.mkdir(exist_ok=False)
 references:
   - id: 019ff54c-87f7-704a-b05e-fb972cc40380
     kind: contractual
