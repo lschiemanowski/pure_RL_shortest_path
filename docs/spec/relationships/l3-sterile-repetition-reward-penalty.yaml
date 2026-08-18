@@ -4,15 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/reward-computation-and-auxiliary-objective/sterile-repetition-reward-penalty
 realization: implemented
 parent: 019fef85-58fe-769d-b675-e1466eae3bff
-references:
-  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
-    kind: contractual
-  - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
-    kind: contractual
-  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
-    kind: contractual
-  - id: 019ff566-c44f-7e89-9f82-0d916901384c
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/rl.py
     selector:
@@ -193,3 +184,12 @@ anchors:
                     sterile_coefficient * selected_repetition if outcome.valid_path else 0.0
                 )
                 total = base_reward + coverage_bonus - sterile_penalty
+references:
+  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    kind: contractual
+  - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
+    kind: contractual
+  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+    kind: contractual
+  - id: 019ff566-c44f-7e89-9f82-0d916901384c
+    kind: contractual

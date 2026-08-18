@@ -4,15 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/checkpointing-and-resumption
 realization: implemented
 parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
-references:
-  - id: 019ff06a-a005-793f-92cd-fda20e6db21c
-    kind: contractual
-  - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
-    kind: contractual
-  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
-    kind: contractual
-  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
-    kind: contractual
 anchors:
   - id: 019ff06a-a006-774a-b4db-38496f087bff
     selector:
@@ -42,3 +33,12 @@ anchors:
         kind: informational
       - id: 019ff564-feee-7b48-82b4-6e3eb7fc1197
         kind: informational
+references:
+  - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+    kind: contractual
+  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+    kind: contractual
+  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+    kind: contractual
+  - id: 019ff06a-a005-793f-92cd-fda20e6db21c
+    kind: contractual

@@ -4,11 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/reward-computation-and-auxiliary-objective/valid-next-token-auxiliary-loss
 realization: implemented
 parent: 019fef85-58fe-769d-b675-e1466eae3bff
-references:
-  - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
-    kind: contractual
-  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/rl.py
     selector:
@@ -162,5 +157,10 @@ anchors:
         one target action or shortest path. Its coefficient is independently
         configurable and may be zero.
     links:
-      - id: 019ff1ac-85fb-77ba-9d70-ff230d27971b
+      - id: 019fef85-58fe-769d-b675-e1466eae3bff
         kind: informational
+references:
+  - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
+    kind: contractual
+  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    kind: contractual

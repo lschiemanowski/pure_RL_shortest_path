@@ -4,9 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/run-configuration-and-provenance/run-identity-provenance-and-random-streams
 realization: implemented
 parent: 019ff06a-a005-793f-92cd-fda20e6db21c
-references:
-  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
@@ -256,3 +253,6 @@ anchors:
           quote: |2-
                 if source.patch:
                     (directory / "source.patch").write_bytes(source.patch)
+references:
+  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+    kind: contractual

@@ -4,13 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/grpo-policy-update
 realization: implemented
 parent: 019feb9e-e54d-7a17-a119-2f1461ab60fb
-references:
-  - id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
-    kind: contractual
-  - id: 019fef85-58fe-769d-b675-e1466eae3bff
-    kind: contractual
-  - id: 019fec29-efaa-756e-a1a3-12c4676ea60a
-    kind: contractual
 anchors:
   - id: 019fef85-58fe-7687-8924-07b708562b3d
     selector:
@@ -79,3 +72,10 @@ anchors:
     links:
       - id: 019ff1ac-85fb-77ba-9d70-ff230d27971b
         kind: informational
+references:
+  - id: 019fec29-efaa-756e-a1a3-12c4676ea60a
+    kind: contractual
+  - id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
+    kind: contractual
+  - id: 019fef85-58fe-769d-b675-e1466eae3bff
+    kind: contractual

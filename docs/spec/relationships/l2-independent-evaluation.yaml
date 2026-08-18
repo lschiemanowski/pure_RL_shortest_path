@@ -4,13 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/independent-evaluation
 realization: implemented
 parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
-references:
-  - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
-    kind: contractual
-  - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
-    kind: contractual
-  - id: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
-    kind: contractual
 anchors:
   - id: 019ff06a-a006-7a1f-830b-e0c7be5b5486
     selector:
@@ -45,3 +38,10 @@ anchors:
     links:
       - id: 019ff503-40c8-728e-87ea-7504bd8e08bc
         kind: informational
+references:
+  - id: 019feb9e-e54d-76f8-a696-ed88088bfaab
+    kind: contractual
+  - id: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
+    kind: contractual
+  - id: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
+    kind: contractual

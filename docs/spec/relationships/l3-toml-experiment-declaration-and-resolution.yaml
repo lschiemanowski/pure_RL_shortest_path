@@ -4,21 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/run-configuration-and-provenance/toml-experiment-declaration-and-resolution
 realization: implemented
 parent: 019ff06a-a005-793f-92cd-fda20e6db21c
-references:
-  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
-    kind: contractual
-  - id: 019fec29-efaa-7969-8feb-594a61b8874d
-    kind: contractual
-  - id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
-    kind: contractual
-  - id: 019fef85-58fe-769d-b675-e1466eae3bff
-    kind: contractual
-  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
-    kind: contractual
-  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
-    kind: contractual
-  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
@@ -313,3 +298,18 @@ anchors:
                     declaration, declaration_directory=source_path.parent
                 )
                 resolved_bytes = _canonical_json_bytes(resolved_configuration_record(resolved))
+references:
+  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+    kind: contractual
+  - id: 019fec29-efaa-7969-8feb-594a61b8874d
+    kind: contractual
+  - id: 019fef85-58fe-7288-8a1c-a95e647a1ef0
+    kind: contractual
+  - id: 019fef85-58fe-769d-b675-e1466eae3bff
+    kind: contractual
+  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+    kind: contractual
+  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+    kind: contractual
+  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    kind: contractual

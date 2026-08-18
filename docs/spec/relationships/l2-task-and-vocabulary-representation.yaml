@@ -4,9 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/task-environment/task-and-vocabulary-representation
 realization: implemented
 parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
-references:
-  - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
-    kind: contractual
 anchors:
   - id: 019febb9-f9e2-7777-acc6-5cf873d9fc7e
     selector:
@@ -30,3 +27,6 @@ anchors:
     links:
       - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
         kind: informational
+references:
+  - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
+    kind: contractual

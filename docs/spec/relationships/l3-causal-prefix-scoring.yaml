@@ -4,9 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/transformer-policy/token-prefix-scoring-interface/causal-prefix-scoring
 realization: implemented
 parent: 019fec29-efaa-756e-a1a3-12c4676ea60a
-references:
-  - id: 019ff180-b61e-7c0a-b65b-28fe5c15b11f
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/model.py
     selector:
@@ -241,3 +238,6 @@ anchors:
             class ModelOutput:
                 logits: torch.Tensor
                 past_key_values: PastKeyValues | None
+references:
+  - id: 019ff180-b61e-7c0a-b65b-28fe5c15b11f
+    kind: contractual

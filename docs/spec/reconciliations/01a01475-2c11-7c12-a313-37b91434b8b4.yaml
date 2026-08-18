@@ -1,0 +1,14 @@
+decisions:
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-7b67-a90a-b3e0fa498cd8
+    outcome: revised
+    rationale: Reaffirmed unchanged prose while migrating the invalid sibling-level informational
+      link to the corresponding parent contract
+  - abstraction_changed: false
+    node: 019ff4ba-9ea8-7e1b-926c-6879c5018051
+    outcome: revised
+    rationale: Reaffirmed unchanged prose while migrating the invalid sibling-level informational
+      link to the corresponding parent contract
+direction: spec-led
+id: 01a01475-2c11-7c12-a313-37b91434b8b4
+rationale: Record the legacy graph-link compatibility migration

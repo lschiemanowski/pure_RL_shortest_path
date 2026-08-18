@@ -4,13 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/rollout-sampling
 realization: implemented
 parent: 019feb9e-e54d-7a17-a119-2f1461ab60fb
-references:
-  - id: 019fec29-efaa-756e-a1a3-12c4676ea60a
-    kind: contractual
-  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
-    kind: contractual
-  - id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
-    kind: contractual
 anchors:
   - id: 019fef85-58fe-7123-a5d4-b337132f0181
     selector:
@@ -38,3 +31,10 @@ anchors:
     links:
       - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
         kind: informational
+references:
+  - id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
+    kind: contractual
+  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+    kind: contractual
+  - id: 019fec29-efaa-756e-a1a3-12c4676ea60a
+    kind: contractual

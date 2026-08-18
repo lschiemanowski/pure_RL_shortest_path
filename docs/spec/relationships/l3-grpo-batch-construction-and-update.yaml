@@ -4,15 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/grpo-policy-update/grpo-batch-construction-and-update
 realization: implemented
 parent: 019fef85-58fe-7cea-922e-23d922a1f3df
-references:
-  - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
-    kind: contractual
-  - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
-    kind: contractual
-  - id: 019ff1ac-85fb-7b67-a90a-b3e0fa498cd8
-    kind: contractual
-  - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/rl.py
     selector:
@@ -331,3 +322,12 @@ anchors:
                         model.parameters(), config.gradient_clip
                     )
                     optimizer.step()
+references:
+  - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
+    kind: contractual
+  - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
+    kind: contractual
+  - id: 019ff1ac-85fb-7b67-a90a-b3e0fa498cd8
+    kind: contractual
+  - id: 019ff1ac-85fb-7e19-9152-5a90b25959de
+    kind: contractual

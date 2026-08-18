@@ -4,11 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/independent-evaluation/policy-evaluation-and-outcome-aggregation
 realization: implemented
 parent: 019ff06a-a006-77b8-a6df-8cd50fedb55e
-references:
-  - id: 019ff503-40c8-7f88-851d-5f0e7dc42b95
-    kind: contractual
-  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
@@ -247,3 +242,8 @@ anchors:
                     raise ValueError(
                         "intervention completions must be produced explicitly before aggregation"
                     )
+references:
+  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    kind: contractual
+  - id: 019ff503-40c8-7f88-851d-5f0e7dc42b95
+    kind: contractual

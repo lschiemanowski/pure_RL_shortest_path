@@ -4,11 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/task-environment/outcome-verification
 realization: implemented
 parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
-references:
-  - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
-    kind: contractual
-  - id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
-    kind: contractual
 anchors:
   - id: 019febb9-f9e2-7b8a-9509-8424b491725a
     selector:
@@ -34,3 +29,8 @@ anchors:
     links:
       - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
         kind: informational
+references:
+  - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
+    kind: contractual
+  - id: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
+    kind: contractual

@@ -25,3 +25,5 @@ L_{\mathrm{valid}}
 It rewards probability mass on the complete valid set rather than demonstrating
 one target action or shortest path. Its coefficient is independently
 configurable and may be zero.
+
+The valid set is computed from the same declared completion protocol used by deterministic verification.

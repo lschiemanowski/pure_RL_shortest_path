@@ -4,11 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/transformer-policy/token-prefix-scoring-interface
 realization: implemented
 parent: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
-references:
-  - id: 019fec29-efaa-7969-8feb-594a61b8874d
-    kind: contractual
-  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
-    kind: contractual
 anchors:
   - id: 019fec29-efaa-71b1-b720-f1b59be0b736
     selector:
@@ -32,3 +27,8 @@ anchors:
     links:
       - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
         kind: informational
+references:
+  - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
+    kind: contractual
+  - id: 019fec29-efaa-7969-8feb-594a61b8874d
+    kind: contractual

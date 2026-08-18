@@ -22,3 +22,5 @@ validation decision retains its example count, frontier, shortest-path success,
 threshold, qualification result, and resulting streak. Every advancement record
 identifies the completed frontier, new frontier, training step, and validation
 result that triggered the transition.
+
+A validation that does not advance the frontier still records the decision and leaves the training distribution centered on the existing frontier.

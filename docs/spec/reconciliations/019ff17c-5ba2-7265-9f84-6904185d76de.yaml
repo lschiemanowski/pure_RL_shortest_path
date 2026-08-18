@@ -2,50 +2,50 @@ decisions:
   - abstraction_changed: false
     node: 019feb9e-e54d-76f8-a696-ed88088bfaab
     outcome: revised
-    rationale: The task environment boundary remains policy- and trainer-independent;
-      this slice implements its already approved graph, representation, completion,
-      and verification descendants.
+    rationale: The task environment boundary remains policy- and trainer-independent; this
+      slice implements its already approved graph, representation, completion, and verification
+      descendants.
   - abstraction_changed: false
     node: 019febb9-f9e2-7b79-b4c4-42e1079298a9
     outcome: revised
-    rationale: The implementation realizes the existing connected-graph and bounded
-      qualifying-query distribution without changing its L2 contract.
+    rationale: The implementation realizes the existing connected-graph and bounded qualifying-query
+      distribution without changing its L2 contract.
   - abstraction_changed: false
     node: 019febb9-f9e2-7c53-8449-ef4fe8d9629e
     outcome: revised
-    rationale: The parser implements the approved reasoning-walk and answer grammar
-      while retaining the L2 separation between syntax and graph correctness.
+    rationale: The parser implements the approved reasoning-walk and answer grammar while
+      retaining the L2 separation between syntax and graph correctness.
   - abstraction_changed: false
     node: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
     outcome: revised
-    rationale: Deterministic answer and reasoning facts implement the existing verifier
-      contract without introducing scalar reward computation.
+    rationale: Deterministic answer and reasoning facts implement the existing verifier contract
+      without introducing scalar reward computation.
   - abstraction_changed: false
     node: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
     outcome: revised
-    rationale: Full-pool label assignment and solution-free serialization implement the
-      approved task and vocabulary representation contract.
+    rationale: Full-pool label assignment and solution-free serialization implement the approved
+      task and vocabulary representation contract.
   - abstraction_changed: false
     node: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
     outcome: revised
-    rationale: Add the approved completion grammar lowering, its precise task.py range,
-      structured parser, and regression tests.
+    rationale: Add the approved completion grammar lowering, its precise task.py range, structured
+      parser, and regression tests.
   - abstraction_changed: false
     node: 019ff0e2-9b56-7255-8803-6584184653db
     outcome: revised
-    rationale: Add the approved graph-construction lowering with uniform sampling over
-      all qualifying ordered pairs, precise implementation ranges, and regression tests.
+    rationale: Add the approved graph-construction lowering with uniform sampling over all
+      qualifying ordered pairs, precise implementation ranges, and regression tests.
   - abstraction_changed: false
     node: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
     outcome: revised
-    rationale: Add the approved full-label-pool and prompt-serialization lowering,
-      precise implementation range, and regression tests.
+    rationale: Add the approved full-label-pool and prompt-serialization lowering, precise
+      implementation range, and regression tests.
   - abstraction_changed: false
     node: 019ff0e2-9b56-7bfd-8466-622e503f5644
     outcome: revised
-    rationale: Add the approved deterministic outcome-verification lowering, precise
-      implementation ranges, and regression tests.
+    rationale: Add the approved deterministic outcome-verification lowering, precise implementation
+      ranges, and regression tests.
 direction: spec-led
 id: 019ff17c-5ba2-7265-9f84-6904185d76de
-rationale: Implement the reviewed task-construction and verification slice in one
-  cohesive module using precise non-overlapping schema-8 range ownership.
+rationale: Implement the reviewed task-construction and verification slice in one cohesive
+  module using precise non-overlapping schema-8 range ownership.

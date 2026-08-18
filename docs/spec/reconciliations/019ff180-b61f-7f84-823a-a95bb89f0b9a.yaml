@@ -2,29 +2,29 @@ decisions:
   - abstraction_changed: false
     node: 019feb9e-e54d-7faf-a0e3-3cb112bfc1e7
     outcome: revised
-    rationale: The approved transformer-policy boundary is unchanged; this slice
-      implements its model-construction and prefix-scoring descendants.
+    rationale: The approved transformer-policy boundary is unchanged; this slice implements
+      its model-construction and prefix-scoring descendants.
   - abstraction_changed: false
     node: 019fec29-efaa-756e-a1a3-12c4676ea60a
     outcome: revised
-    rationale: Implement the existing complete-vocabulary causal scoring contract with
-      validated masks, context limits, and equivalent full and cached execution.
+    rationale: Implement the existing complete-vocabulary causal scoring contract with validated
+      masks, context limits, and equivalent full and cached execution.
   - abstraction_changed: false
     node: 019fec29-efaa-7969-8feb-594a61b8874d
     outcome: revised
-    rationale: Clarify from-scratch initialization of random matrices and fixed unit
-      normalization scales, then implement the approved architecture contract.
+    rationale: Clarify from-scratch initialization of random matrices and fixed unit normalization
+      scales, then implement the approved architecture contract.
   - abstraction_changed: false
     node: 019ff180-b61f-74e6-b0fe-376f87ea47a9
     outcome: revised
-    rationale: Add the causal prefix-scoring lowering, precise model.py ranges, and
-      regression tests for causality, padding, caching, and validation failures.
+    rationale: Add the causal prefix-scoring lowering, precise model.py ranges, and regression
+      tests for causality, padding, caching, and validation failures.
   - abstraction_changed: false
     node: 019ff180-b61e-7c0a-b65b-28fe5c15b11f
     outcome: revised
-    rationale: Add the decoder-only construction lowering, precise model.py ranges,
-      reproducible from-scratch initialization, and configuration tests.
+    rationale: Add the decoder-only construction lowering, precise model.py ranges, reproducible
+      from-scratch initialization, and configuration tests.
 direction: spec-led
 id: 019ff180-b61f-7f84-823a-a95bb89f0b9a
-rationale: Implement the reviewed transformer-policy slice in one model module with
-  precise non-overlapping schema-8 range ownership.
+rationale: Implement the reviewed transformer-policy slice in one model module with precise
+  non-overlapping schema-8 range ownership.

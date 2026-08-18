@@ -4,9 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/task-environment/outcome-verification/deterministic-outcome-verification
 realization: implemented
 parent: 019febb9-f9e2-79cf-afaa-5b21ac52b2ec
-references:
-  - id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/task.py
     selector:
@@ -152,5 +149,7 @@ anchors:
         kind: contractual
         code_anchor: 019ff0e2-9b56-786f-ac38-387954700112
         selector:
-          quote: |-
-            """Derive exact task facts without assigning a scalar learning reward."""
+          quote: '"""Derive exact task facts without assigning a scalar learning reward."""'
+references:
+  - id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
+    kind: contractual

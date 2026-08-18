@@ -4,15 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/independent-evaluation/independent-evaluation-set-and-sampling
 realization: implemented
 parent: 019ff06a-a006-77b8-a6df-8cd50fedb55e
-references:
-  - id: 019ff0e2-9b56-7255-8803-6584184653db
-    kind: contractual
-  - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
-    kind: contractual
-  - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
-    kind: contractual
-  - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
@@ -307,3 +298,12 @@ anchors:
                     ),
                     autocast_dtype=autocast_dtype,
                 )
+references:
+  - id: 019ff0e2-9b56-7255-8803-6584184653db
+    kind: contractual
+  - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
+    kind: contractual
+  - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
+    kind: contractual
+  - id: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
+    kind: contractual

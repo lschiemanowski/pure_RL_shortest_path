@@ -4,11 +4,6 @@ level: L2
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/curriculum-protocol
 realization: implemented
 parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
-references:
-  - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
-    kind: contractual
-  - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
-    kind: contractual
 anchors:
   - id: 019fef85-58fe-70e1-8523-b7225c1de61b
     selector:
@@ -36,3 +31,8 @@ anchors:
     links:
       - id: 019ff4ba-9ea8-7e1b-926c-6879c5018051
         kind: informational
+references:
+  - id: 019feb9e-e54d-7a17-a119-2f1461ab60fb
+    kind: contractual
+  - id: 019febb9-f9e2-7b79-b4c4-42e1079298a9
+    kind: contractual

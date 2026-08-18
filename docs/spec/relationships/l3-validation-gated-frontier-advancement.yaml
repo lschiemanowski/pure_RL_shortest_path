@@ -4,11 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/curriculum-protocol/validation-gated-frontier-advancement
 realization: implemented
 parent: 019fef85-58fe-7e1a-9591-20d341a1a7f6
-references:
-  - id: 019ff4ba-9ea8-722a-a072-7649127d0a6b
-    kind: contractual
-  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
@@ -134,7 +129,7 @@ anchors:
         remain available through the backward tail, while future exposure is controlled
         entirely by the sharply decaying forward tail.
     links:
-      - id: 019ff4ba-9ea8-722a-a072-7649127d0a6b
+      - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
         kind: informational
   - id: 019ff4ba-9ea8-79ce-a922-b7a0333599f7
     selector:
@@ -157,3 +152,8 @@ anchors:
                     resulting_state=resulting_state,
                     transition=transition,
                 )
+references:
+  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    kind: contractual
+  - id: 019ff4ba-9ea8-722a-a072-7649127d0a6b
+    kind: contractual

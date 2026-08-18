@@ -4,17 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/evidence-recording-and-comparability/append-only-evidence-and-comparable-records
 realization: implemented
 parent: 019ff06a-a006-7d37-9c30-0fdce285ab2b
-references:
-  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
-    kind: contractual
-  - id: 019ff54c-87f7-7213-ab81-acb27e95126d
-    kind: contractual
-  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
-    kind: contractual
-  - id: 019fef85-58fe-769d-b675-e1466eae3bff
-    kind: contractual
-  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
@@ -224,9 +213,9 @@ anchors:
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
-        code_anchor: 019ff5f7-c5bd-7fcd-95c7-fc703c63afc9
+        code_anchor: 019ff5f7-c5bd-7307-b7d9-671295a28e39
         selector:
-          quote: '"sterile_repetition_rate_all",'
+          quote: '"sterile_repetition_penalty",'
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
         code_anchor: 019ff5f7-c5bd-7612-a4de-d7f2d50d85c3
@@ -234,14 +223,14 @@ anchors:
           quote: '"sterile_repetition_rate_off_answer",'
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
-        code_anchor: 019ff5f7-c5bd-7307-b7d9-671295a28e39
-        selector:
-          quote: '"sterile_repetition_penalty",'
-      - path: src/pure_rl_shortest_path/run.py
-        kind: contractual
         code_anchor: 019ff5f7-c5bd-7ef5-a868-e844679cf21e
         selector:
           quote: '"sterile_repetition_mode": configuration.reward.sterile_repetition_mode,'
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff5f7-c5bd-7fcd-95c7-fc703c63afc9
+        selector:
+          quote: '"sterile_repetition_rate_all",'
   - id: 019ff566-c44f-7597-9c52-dc3c295adf25
     selector:
       quote: |-
@@ -301,3 +290,14 @@ anchors:
                     resolved_configuration_record(right),
                 )
                 return tuple(differences)
+references:
+  - id: 019fef85-58fe-769d-b675-e1466eae3bff
+    kind: contractual
+  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+    kind: contractual
+  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    kind: contractual
+  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+    kind: contractual
+  - id: 019ff54c-87f7-7213-ab81-acb27e95126d
+    kind: contractual

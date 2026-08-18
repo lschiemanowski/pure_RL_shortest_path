@@ -4,15 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/checkpointing-and-resumption/atomic-checkpoints-and-validated-resumption
 realization: implemented
 parent: 019ff06a-a006-7bb5-9289-6b1bbf153896
-references:
-  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
-    kind: contractual
-  - id: 019ff54c-87f7-7213-ab81-acb27e95126d
-    kind: contractual
-  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
-    kind: contractual
-  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
@@ -270,3 +261,12 @@ anchors:
                 optimizer.load_state_dict(checkpoint.payload["optimizer"])
                 random_streams.load_state_dict(checkpoint.payload["random_streams"])
                 torch.set_rng_state(checkpoint.payload["torch_rng_state"])
+references:
+  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+    kind: contractual
+  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+    kind: contractual
+  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+    kind: contractual
+  - id: 019ff54c-87f7-7213-ab81-acb27e95126d
+    kind: contractual

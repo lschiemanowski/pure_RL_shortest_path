@@ -2,56 +2,54 @@ decisions:
   - abstraction_changed: false
     node: 019feb83-80f6-786a-bf25-d637dd4a6af1
     outcome: revised
-    rationale: Mark the research system implemented after completing the local TOML,
-      training, checkpoint, evaluation, and evidence workflows.
+    rationale: Mark the research system implemented after completing the local TOML, training,
+      checkpoint, evaluation, and evidence workflows.
   - abstraction_changed: false
     node: 019feb9e-e54d-7450-bdf0-d2831a73da31
     outcome: revised
-    rationale: Complete the experiment protocol with reproducible execution,
-      resumption, independent evaluation, and auditable artifacts.
+    rationale: Complete the experiment protocol with reproducible execution, resumption, independent
+      evaluation, and auditable artifacts.
   - abstraction_changed: false
     node: 019ff06a-a006-7bb5-9289-6b1bbf153896
     outcome: revised
-    rationale: Remove obsolete interpolation state and implement versioned atomic
-      checkpoints with exact compatible restoration and explicit derived-run lineage.
+    rationale: Remove obsolete interpolation state and implement versioned atomic checkpoints
+      with exact compatible restoration and explicit derived-run lineage.
   - abstraction_changed: false
     node: 019ff06a-a006-7d37-9c30-0fdce285ab2b
     outcome: revised
-    rationale: Implement append-only metric, lifecycle, evaluation, and deterministic
-      representative-completion evidence with field-level configuration differences.
+    rationale: Implement append-only metric, lifecycle, evaluation, and deterministic representative-completion
+      evidence with field-level configuration differences.
   - abstraction_changed: false
     node: 019ff06a-a005-793f-92cd-fda20e6db21c
     outcome: revised
-    rationale: Add the approved small command dispatcher and complete TOML-driven run
-      orchestration without scientific command-line hyperparameter flags.
+    rationale: Add the approved small command dispatcher and complete TOML-driven run orchestration
+      without scientific command-line hyperparameter flags.
   - abstraction_changed: false
     node: 019ff566-c44f-7e89-9f82-0d916901384c
     outcome: revised
-    rationale: Add exact training and evaluation records, synchronized JSON Lines,
-      unbiased deterministic representatives, and structural configuration comparison.
+    rationale: Add exact training and evaluation records, synchronized JSON Lines, unbiased
+      deterministic representatives, and structural configuration comparison.
   - abstraction_changed: false
     node: 019ff564-feee-7b48-82b4-6e3eb7fc1197
     outcome: revised
-    rationale: Add purpose-identified checkpoint payloads, atomic named and latest
-      installation, compatibility validation, and restoration of every continuation
-      state.
+    rationale: Add purpose-identified checkpoint payloads, atomic named and latest installation,
+      compatibility validation, and restoration of every continuation state.
   - abstraction_changed: false
     node: 019ff566-c44f-774b-ba4c-8b2dc0509fe6
     outcome: revised
-    rationale: Add fresh training, same-run and derived resumption, and nonmutating
-      standalone evaluation through TOML-only scientific declarations.
+    rationale: Add fresh training, same-run and derived resumption, and nonmutating standalone
+      evaluation through TOML-only scientific declarations.
   - abstraction_changed: false
     node: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
     outcome: revised
-    rationale: Preserve complete-softmax policy sampling and group order while making
-      CPU-seeded sampling portable to accelerator logits and restoring caller model
-      mode after collection.
+    rationale: Preserve complete-softmax policy sampling and group order while making CPU-seeded
+      sampling portable to accelerator logits and restoring caller model mode after collection.
   - abstraction_changed: false
     node: 019ff54c-87f7-7213-ab81-acb27e95126d
     outcome: revised
-    rationale: Extend recorded provenance with derived-run parent identity, source
-      checkpoint, and explicit configuration differences.
+    rationale: Extend recorded provenance with derived-run parent identity, source checkpoint,
+      and explicit configuration differences.
 direction: spec-led
 id: 019ff564-feee-7774-97d8-93d838a09bbf
-rationale: Complete the remaining approved experiment-protocol lowering and executable
-  research workflow without introducing new scientific signals or target supervision.
+rationale: Complete the remaining approved experiment-protocol lowering and executable research
+  workflow without introducing new scientific signals or target supervision.

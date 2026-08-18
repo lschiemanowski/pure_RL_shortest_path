@@ -4,9 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/reward-computation-and-auxiliary-objective/verifier-reward-and-coverage-shaping
 realization: implemented
 parent: 019fef85-58fe-769d-b675-e1466eae3bff
-references:
-  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/rl.py
     selector:
@@ -83,3 +80,6 @@ anchors:
                     else 0.0
                 )
                 return base_reward, coverage, coefficient, coefficient * coverage
+references:
+  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    kind: contractual

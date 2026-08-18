@@ -4,19 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/experiment-protocol-and-evidence/run-configuration-and-provenance/command-line-run-orchestration
 realization: implemented
 parent: 019ff06a-a005-793f-92cd-fda20e6db21c
-references:
-  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
-    kind: contractual
-  - id: 019ff564-feee-7b48-82b4-6e3eb7fc1197
-    kind: contractual
-  - id: 019ff566-c44f-7e89-9f82-0d916901384c
-    kind: contractual
-  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
-    kind: contractual
-  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
-    kind: contractual
-  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/__main__.py
   - path: src/pure_rl_shortest_path/run.py
@@ -272,6 +259,15 @@ anchors:
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
+        code_anchor: 019ff564-feee-73b8-a81f-e9a51922b4a7
+        selector:
+          quote: |2-
+                final_checkpoint = save_checkpoint("final")
+                writer.event(
+                    "run_completed", step, {"checkpoint": str(final_checkpoint)}
+                )
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
         code_anchor: 019ff56d-fb4c-79bf-b7da-fabc30b9dadf
         selector:
           quote: |2-
@@ -302,12 +298,16 @@ anchors:
                         "run_interrupted", step, {"checkpoint": str(latest_checkpoint)}
                     )
                     raise
-      - path: src/pure_rl_shortest_path/run.py
-        kind: contractual
-        code_anchor: 019ff564-feee-73b8-a81f-e9a51922b4a7
-        selector:
-          quote: |2-
-                final_checkpoint = save_checkpoint("final")
-                writer.event(
-                    "run_completed", step, {"checkpoint": str(final_checkpoint)}
-                )
+references:
+  - id: 019fef85-58fe-7cea-922e-23d922a1f3df
+    kind: contractual
+  - id: 019fef85-58fe-7e1a-9591-20d341a1a7f6
+    kind: contractual
+  - id: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+    kind: contractual
+  - id: 019ff54c-87f7-704a-b05e-fb972cc40380
+    kind: contractual
+  - id: 019ff564-feee-7b48-82b4-6e3eb7fc1197
+    kind: contractual
+  - id: 019ff566-c44f-7e89-9f82-0d916901384c
+    kind: contractual

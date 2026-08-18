@@ -4,11 +4,6 @@ level: L3
 scope: pure-rl-shortest-path/reinforcement-learning-trainer/rollout-sampling/grouped-on-policy-rollout-collection
 realization: implemented
 parent: 019fef85-58fe-7288-8a1c-a95e647a1ef0
-references:
-  - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
-    kind: contractual
-  - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
-    kind: contractual
 covers:
   - path: src/pure_rl_shortest_path/rl.py
     selector:
@@ -212,13 +207,18 @@ anchors:
         attention caching, and seeded categorical sampling may alter execution but not
         the defined distribution or group order.
     links:
-      - path: src/pure_rl_shortest_path/rl.py
-        kind: contractual
-        code_anchor: 019ff1ac-85fb-7515-b411-89dc830a00e8
-        selector:
-          quote: terminated_by_eos=bool(completion and completion[-1] == EOS),
       - path: src/pure_rl_shortest_path/model.py
         kind: contractual
         code_anchor: 019ff6c7-c15e-7781-929f-931b38aa1ada
         selector:
           quote: done |= selected.eq(eos_token)
+      - path: src/pure_rl_shortest_path/rl.py
+        kind: contractual
+        code_anchor: 019ff1ac-85fb-7515-b411-89dc830a00e8
+        selector:
+          quote: terminated_by_eos=bool(completion and completion[-1] == EOS),
+references:
+  - id: 019ff0e2-9b56-7a5a-9420-b3ab3ae5d522
+    kind: contractual
+  - id: 019ff180-b61f-74e6-b0fe-376f87ea47a9
+    kind: contractual
