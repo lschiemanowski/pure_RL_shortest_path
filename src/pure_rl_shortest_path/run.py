@@ -1059,11 +1059,16 @@ def load_training_checkpoint(path: str | Path) -> LoadedCheckpoint:
     missing = sorted(required - set(payload))
     if missing:
         raise ValueError(f"checkpoint is missing: {', '.join(missing)}")
-    configuration = run_configuration_from_record(payload["configuration"])
+    configuration_record = payload["configuration"]
+    configuration = run_configuration_from_record(configuration_record)
     if configuration.algorithm == "ppo" and "value_head" not in payload:
         raise ValueError("PPO checkpoint is missing value-head parameters")
-    digest = configuration_sha256(configuration)
-    if digest != payload["configuration_sha256"]:
+    normalized_digest = configuration_sha256(configuration)
+    recorded_digest = hashlib.sha256(
+        _canonical_json_bytes(configuration_record)
+    ).hexdigest()
+    stored_digest = payload["configuration_sha256"]
+    if stored_digest not in (normalized_digest, recorded_digest):
         raise ValueError("checkpoint configuration digest is invalid")
     purpose = payload["purpose"]
     if purpose not in (
@@ -1085,7 +1090,7 @@ def load_training_checkpoint(path: str | Path) -> LoadedCheckpoint:
         step=step,
         curriculum_state=state,
         configuration=configuration,
-        configuration_sha256=digest,
+        configuration_sha256=stored_digest,
         payload=payload,
     )
 

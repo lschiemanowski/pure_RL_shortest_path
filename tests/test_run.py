@@ -526,6 +526,49 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
             self.assertEqual(resumed_checkpoint.step, 2)
             self.assertIn("value_head", resumed_checkpoint.payload)
 
+    def test_checkpoint_accepts_a_valid_configuration_record_from_before_defaults_expand(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "ppo.toml"
+            path.write_text(ppo_fast_config(), encoding="utf-8")
+            loaded = load_run_configuration(path)
+            run_directory = root / "run"
+            run_directory.mkdir()
+            result = execute_training(
+                run_directory=run_directory,
+                run_id="ffffffff-ffff-4fff-8fff-ffffffffffff",
+                configuration=loaded.resolved,
+                seeds=derive_named_seeds(loaded.resolved.master_seed),
+            )
+
+            payload = torch.load(
+                result.final_checkpoint, map_location="cpu", weights_only=False
+            )
+            del payload["configuration"]["ppo"][
+                "suppress_zero_reward_policy_updates"
+            ]
+            encoded = (
+                json.dumps(
+                    payload["configuration"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            payload["configuration_sha256"] = hashlib.sha256(encoded).hexdigest()
+            legacy_checkpoint = root / "legacy.pt"
+            torch.save(payload, legacy_checkpoint)
+
+            checkpoint = load_training_checkpoint(legacy_checkpoint)
+            self.assertFalse(
+                checkpoint.configuration.ppo.suppress_zero_reward_policy_updates
+            )
+            self.assertEqual(
+                checkpoint.configuration_sha256,
+                payload["configuration_sha256"],
+            )
+
     def test_standalone_evaluation_is_declared_and_nonmutating(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

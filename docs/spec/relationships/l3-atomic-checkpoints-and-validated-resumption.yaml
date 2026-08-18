@@ -119,59 +119,18 @@ covers:
             return path
   - path: src/pure_rl_shortest_path/run.py
     selector:
-      quote: |-
-        def load_training_checkpoint(path: str | Path) -> LoadedCheckpoint:
-            checkpoint_path = Path(path).expanduser().resolve()
-            payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            if not isinstance(payload, dict):
-                raise ValueError("checkpoint payload must be a mapping")
-            if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
-                raise ValueError("unsupported checkpoint schema version")
-            required = {
-                "run_id",
-                "purpose",
-                "step",
-                "curriculum_state",
-                "configuration",
-                "configuration_sha256",
-                "policy",
-                "reference",
-                "optimizer",
-                "random_streams",
-                "torch_rng_state",
-            }
-            missing = sorted(required - set(payload))
-            if missing:
-                raise ValueError(f"checkpoint is missing: {', '.join(missing)}")
-            configuration = run_configuration_from_record(payload["configuration"])
+      quote: |2-
+            configuration_record = payload["configuration"]
+            configuration = run_configuration_from_record(configuration_record)
             if configuration.algorithm == "ppo" and "value_head" not in payload:
                 raise ValueError("PPO checkpoint is missing value-head parameters")
-            digest = configuration_sha256(configuration)
-            if digest != payload["configuration_sha256"]:
+            normalized_digest = configuration_sha256(configuration)
+            recorded_digest = hashlib.sha256(
+                _canonical_json_bytes(configuration_record)
+            ).hexdigest()
+            stored_digest = payload["configuration_sha256"]
+            if stored_digest not in (normalized_digest, recorded_digest):
                 raise ValueError("checkpoint configuration digest is invalid")
-            purpose = payload["purpose"]
-            if purpose not in (
-                "periodic",
-                "curriculum_transition",
-                "interruption",
-                "final",
-            ):
-                raise ValueError("checkpoint purpose is invalid")
-            step = payload["step"]
-            if isinstance(step, bool) or not isinstance(step, int) or step < 0:
-                raise ValueError("checkpoint step is invalid")
-            state = CurriculumState(**payload["curriculum_state"])
-            state.validate_for(configuration.curriculum)
-            return LoadedCheckpoint(
-                path=checkpoint_path,
-                run_id=_nonempty_string(payload["run_id"], "checkpoint.run_id"),
-                purpose=purpose,
-                step=step,
-                curriculum_state=state,
-                configuration=configuration,
-                configuration_sha256=digest,
-                payload=payload,
-            )
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |-
@@ -322,69 +281,30 @@ anchors:
                 return path
   - id: 019ff564-feee-7b57-9bfa-803ce161d9cf
     selector:
-      quote: Loading validates the checkpoint schema, configuration digest, and presence of
-        PPO value parameters. Same-run resumption requires the recorded configuration. A derived
-        run may change future training settings but rejects changes to the selected algorithm,
-        task vocabulary, completion protocol, model architecture, master seed, or ordered
-        curriculum stages.
+      quote: Loading validates the checkpoint schema, presence of PPO value parameters, and
+        the configuration digest against either the serialized configuration record or its
+        normalized typed form. A valid older record may therefore acquire newly introduced
+        defaults without being rejected or losing its original digest. Same-run resumption
+        requires the recorded configuration. A derived run may change future training settings
+        but rejects changes to the selected algorithm, task vocabulary, completion protocol,
+        model architecture, master seed, or ordered curriculum stages.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
         code_anchor: 01a014d0-555b-780a-9d48-b533276a82b1
         selector:
-          quote: |-
-            def load_training_checkpoint(path: str | Path) -> LoadedCheckpoint:
-                checkpoint_path = Path(path).expanduser().resolve()
-                payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-                if not isinstance(payload, dict):
-                    raise ValueError("checkpoint payload must be a mapping")
-                if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
-                    raise ValueError("unsupported checkpoint schema version")
-                required = {
-                    "run_id",
-                    "purpose",
-                    "step",
-                    "curriculum_state",
-                    "configuration",
-                    "configuration_sha256",
-                    "policy",
-                    "reference",
-                    "optimizer",
-                    "random_streams",
-                    "torch_rng_state",
-                }
-                missing = sorted(required - set(payload))
-                if missing:
-                    raise ValueError(f"checkpoint is missing: {', '.join(missing)}")
-                configuration = run_configuration_from_record(payload["configuration"])
+          quote: |2-
+                configuration_record = payload["configuration"]
+                configuration = run_configuration_from_record(configuration_record)
                 if configuration.algorithm == "ppo" and "value_head" not in payload:
                     raise ValueError("PPO checkpoint is missing value-head parameters")
-                digest = configuration_sha256(configuration)
-                if digest != payload["configuration_sha256"]:
+                normalized_digest = configuration_sha256(configuration)
+                recorded_digest = hashlib.sha256(
+                    _canonical_json_bytes(configuration_record)
+                ).hexdigest()
+                stored_digest = payload["configuration_sha256"]
+                if stored_digest not in (normalized_digest, recorded_digest):
                     raise ValueError("checkpoint configuration digest is invalid")
-                purpose = payload["purpose"]
-                if purpose not in (
-                    "periodic",
-                    "curriculum_transition",
-                    "interruption",
-                    "final",
-                ):
-                    raise ValueError("checkpoint purpose is invalid")
-                step = payload["step"]
-                if isinstance(step, bool) or not isinstance(step, int) or step < 0:
-                    raise ValueError("checkpoint step is invalid")
-                state = CurriculumState(**payload["curriculum_state"])
-                state.validate_for(configuration.curriculum)
-                return LoadedCheckpoint(
-                    path=checkpoint_path,
-                    run_id=_nonempty_string(payload["run_id"], "checkpoint.run_id"),
-                    purpose=purpose,
-                    step=step,
-                    curriculum_state=state,
-                    configuration=configuration,
-                    configuration_sha256=digest,
-                    payload=payload,
-                )
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
         code_anchor: 01a014d0-557a-7a7f-9f7f-a66b420afa7b
