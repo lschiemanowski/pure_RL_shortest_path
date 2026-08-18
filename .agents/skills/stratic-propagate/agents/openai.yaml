@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stratic Propagate"
+  short_description: "Propagate Stratic contracts into code"
+  default_prompt: "Use $stratic-propagate to propagate this requested Stratic contract change into its affected descriptions and code."

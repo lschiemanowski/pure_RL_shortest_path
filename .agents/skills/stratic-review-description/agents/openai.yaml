@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Stratic Description"
+  short_description: "Semantically review description candidates"
+  default_prompt: "Use $stratic-review-description to review a staged Stratic description against the shared style guide."

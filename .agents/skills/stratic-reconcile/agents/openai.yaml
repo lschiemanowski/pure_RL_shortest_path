@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stratic Reconcile"
+  short_description: "Reconcile code changes with Stratic contracts"
+  default_prompt: "Use $stratic-reconcile to reconcile this repository change with its Stratic description graph."
