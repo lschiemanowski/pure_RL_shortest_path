@@ -1,0 +1,15 @@
+decisions:
+  - abstraction_changed: false
+    node: 019ff54c-87f7-704a-b05e-fb972cc40380
+    outcome: confirmed_unchanged
+    rationale: Checkpoint digest compatibility changes only checkpoint loading; typed TOML
+      declaration and resolution remain accurate.
+  - abstraction_changed: false
+    node: 019ff54c-87f7-7213-ab81-acb27e95126d
+    outcome: confirmed_unchanged
+    rationale: Checkpoint digest compatibility preserves the original digest and does not
+      change run identity, provenance, or random-stream guarantees.
+direction: code-led
+id: 01a0162e-54e1-78b4-9945-829c7ef30709
+rationale: Confirm configuration and provenance contracts remain valid after checkpoint digest
+  compatibility.
