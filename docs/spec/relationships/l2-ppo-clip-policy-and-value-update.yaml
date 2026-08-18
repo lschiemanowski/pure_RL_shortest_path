@@ -16,16 +16,6 @@ anchors:
     links:
       - id: 01a014a1-15c1-75e3-bb0b-d150f5ea5048
         kind: informational
-  - id: 01a0149f-9d0d-7210-808e-a0d7e3613314
-    selector:
-      quote: The policy objective applies PPO's clipped likelihood-ratio surrogate to sampled
-        tokens. A separately weighted value objective optionally clips value changes around
-        rollout-time predictions, and an entropy bonus remains explicit. Advantage normalization
-        preserves a nonzero constant signal when variance is negligible instead of erasing
-        it.
-    links:
-      - id: 01a014a1-15c1-7adc-b136-ec4db3ebf1e6
-        kind: informational
   - id: 01a0149f-9d0d-7473-a7c2-b7ed04b19a6b
     selector:
       quote: The complete update may also include the existing reference-policy divergence
@@ -33,6 +23,19 @@ anchors:
         optimization epochs and microbatches reuse one fixed on-policy batch; old log probabilities,
         old values, advantages, and returns remain fixed throughout those epochs. Only the
         current actor and value function are updated.
+    links:
+      - id: 01a014a1-15c1-7adc-b136-ec4db3ebf1e6
+        kind: informational
+  - id: 01a0149f-9d0d-7210-808e-a0d7e3613314
+    selector:
+      quote: The policy objective applies PPO's clipped likelihood-ratio surrogate to sampled
+        tokens. When configured, a fixed rollout batch whose scalar completion rewards are
+        all zero contributes no clipped policy-surrogate term; value learning, entropy, reference-policy
+        divergence, and valid-next-token auxiliary terms remain governed by their independent
+        configuration. A separately weighted value objective optionally clips value changes
+        around rollout-time predictions, and an entropy bonus remains explicit. Advantage
+        normalization preserves a nonzero constant signal when variance is negligible instead
+        of erasing it.
     links:
       - id: 01a014a1-15c1-7adc-b136-ec4db3ebf1e6
         kind: informational

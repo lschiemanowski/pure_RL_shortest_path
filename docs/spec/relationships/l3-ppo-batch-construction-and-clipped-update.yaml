@@ -22,8 +22,11 @@ covers:
             valid_coefficient: float = 0.0
             gradient_clip: float = 1.0
             advantage_epsilon: float = 1e-6
+            suppress_zero_reward_policy_updates: bool = False
 
             def __post_init__(self) -> None:
+                if not isinstance(self.suppress_zero_reward_policy_updates, bool):
+                    raise TypeError("suppress_zero_reward_policy_updates must be a boolean")
                 for name in ("update_epochs", "microbatch_size"):
                     object.__setattr__(self, name, _positive_int(getattr(self, name), name))
                 for name in ("gamma", "gae_lambda"):
@@ -147,6 +150,10 @@ covers:
             )
             if action_count == 0:
                 raise ValueError("PPO batch must contain sampled actions")
+            suppress_policy_update = (
+                config.suppress_zero_reward_policy_updates
+                and not bool(batch.packed.rewards.ne(0).any())
+            )
             totals = {
                 name: 0.0
                 for name in (
@@ -192,7 +199,10 @@ covers:
                         surrogate = torch.minimum(
                             ratio * chunk.advantages, clipped_ratio * chunk.advantages
                         )
-                        policy_loss = -surrogate[packed.action_mask].sum() / action_count
+                        if suppress_policy_update:
+                            policy_loss = surrogate[packed.action_mask].sum() * 0.0
+                        else:
+                            policy_loss = -surrogate[packed.action_mask].sum() / action_count
 
                         value_error = (values - chunk.returns).square()
                         if config.value_clip_epsilon is not None:
@@ -329,11 +339,14 @@ anchors:
   - id: 01a014a1-15c1-7e6c-9f42-b0739dc1320a
     selector:
       quote: For every sampled token, the policy loss is the negative minimum of the unclipped
-        likelihood-ratio advantage and the ratio clipped to the declared interval. The value
-        loss is the larger squared error between the return and either the new prediction
-        or, when value clipping is enabled, the rollout prediction plus a clipped change.
-        Entropy is averaged over sampled-token distributions. Clip fraction and explained
-        variance remain observable.
+        likelihood-ratio advantage and the ratio clipped to the declared interval. When configured
+        and every scalar completion reward in the fixed rollout batch is zero, the policy
+        loss is instead zero for every optimization epoch and microbatch; value loss, entropy,
+        reference-policy divergence, and valid-next auxiliary loss remain independently active
+        according to their coefficients. The value loss is the larger squared error between
+        the return and either the new prediction or, when value clipping is enabled, the rollout
+        prediction plus a clipped change. Entropy is averaged over sampled-token distributions.
+        Clip fraction and explained variance remain observable.
     links:
       - path: src/pure_rl_shortest_path/ppo.py
         kind: contractual
@@ -363,6 +376,10 @@ anchors:
                 )
                 if action_count == 0:
                     raise ValueError("PPO batch must contain sampled actions")
+                suppress_policy_update = (
+                    config.suppress_zero_reward_policy_updates
+                    and not bool(batch.packed.rewards.ne(0).any())
+                )
                 totals = {
                     name: 0.0
                     for name in (
@@ -408,7 +425,10 @@ anchors:
                             surrogate = torch.minimum(
                                 ratio * chunk.advantages, clipped_ratio * chunk.advantages
                             )
-                            policy_loss = -surrogate[packed.action_mask].sum() / action_count
+                            if suppress_policy_update:
+                                policy_loss = surrogate[packed.action_mask].sum() * 0.0
+                            else:
+                                policy_loss = -surrogate[packed.action_mask].sum() / action_count
 
                             value_error = (values - chunk.returns).square()
                             if config.value_clip_epsilon is not None:
@@ -548,6 +568,10 @@ anchors:
                 )
                 if action_count == 0:
                     raise ValueError("PPO batch must contain sampled actions")
+                suppress_policy_update = (
+                    config.suppress_zero_reward_policy_updates
+                    and not bool(batch.packed.rewards.ne(0).any())
+                )
                 totals = {
                     name: 0.0
                     for name in (
@@ -593,7 +617,10 @@ anchors:
                             surrogate = torch.minimum(
                                 ratio * chunk.advantages, clipped_ratio * chunk.advantages
                             )
-                            policy_loss = -surrogate[packed.action_mask].sum() / action_count
+                            if suppress_policy_update:
+                                policy_loss = surrogate[packed.action_mask].sum() * 0.0
+                            else:
+                                policy_loss = -surrogate[packed.action_mask].sum() / action_count
 
                             value_error = (values - chunk.returns).square()
                             if config.value_clip_epsilon is not None:

@@ -389,133 +389,6 @@ anchors:
                     object.__setattr__(
                         self, "minimum_reason_tokens", minimum_reason_tokens
                     )
-  - id: 019ff54c-87f7-720c-9062-62c09a55bf81
-    selector:
-      quote: Loading converts the TOML data into typed configurations. It validates the selected
-        algorithm, applies PPO defaults for clipping, discount, trace decay, value and entropy
-        coefficients, epochs, and microbatching, and applies the GRPO group-size compatibility
-        rule only when GRPO is selected. Unknown keys, invalid types, impossible completion
-        budgets, and incompatible settings are rejected before a model or run directory is
-        created.
-    links:
-      - path: src/pure_rl_shortest_path/run.py
-        kind: contractual
-        code_anchor: 01a014d0-551f-70ba-aa9e-735ba3946122
-        selector:
-          quote: |-
-            def resolve_run_configuration(
-                declaration: Mapping[str, Any], *, declaration_directory: Path
-            ) -> RunConfiguration:
-                """Resolve a parsed TOML declaration into the project's typed contracts."""
-
-                root = _ConfigTable(declaration, "root")
-                schema_version = root.take("schema_version")
-                name = root.take("name")
-                seed = root.take("seed")
-                algorithm = root.take("algorithm", "grpo")
-
-                task = root.table("task", required=True)
-                vocabulary = Vocabulary(task.take("node_label_count"))
-                minimum_reason_tokens = _positive_int(
-                    task.take("minimum_reason_tokens", 1), "task.minimum_reason_tokens"
-                )
-                task.finish()
-
-                model_data = root.table("model")
-                model = model_data.build(
-                    TransformerConfig,
-                    aliases={"n_layers": "layers", "n_heads": "heads"},
-                    fixed={"vocab_size": vocabulary.size},
-                )
-                model_data.finish()
-
-                rollout_data = root.table("rollout")
-                rollout = rollout_data.build(
-                    RolloutSamplingConfig,
-                    defaults={"group_size": 8, "max_new_tokens": 96},
-                )
-                rollout_data.finish()
-
-                reward_data = root.table("reward")
-                reward = reward_data.build(RewardConfig)
-                reward_data.finish()
-
-                optimization = root.table("optimization")
-                optimizer = optimization.build(OptimizerConfig)
-                grpo = optimization.build(
-                    GRPOConfig,
-                    defaults={"update_epochs": 2, "kl_coefficient": 0.001},
-                    fixed={"group_size": rollout.group_size},
-                )
-                optimization.finish()
-
-                ppo_data = root.table("ppo")
-                ppo = ppo_data.build(PPOConfig)
-                ppo_data.finish()
-
-                curriculum_data = root.table("curriculum", required=True)
-                stages_data = curriculum_data.take("stages")
-                if not isinstance(stages_data, list) or not stages_data:
-                    raise ConfigurationError(
-                        "curriculum.stages must be a nonempty array of tables"
-                    )
-                stages = tuple(
-                    _graph_stage(stage, index) for index, stage in enumerate(stages_data)
-                )
-                curriculum = curriculum_data.build(CurriculumConfig, fixed={"stages": stages})
-                curriculum_data.finish()
-
-                training_data = root.table("training")
-                training = training_data.build(TrainingScheduleConfig)
-                training_data.finish()
-
-                evaluation_data = root.table("evaluation")
-                evaluation_sampling = evaluation_data.build(
-                    EvaluationSamplingConfig,
-                    defaults={"max_new_tokens": rollout.max_new_tokens},
-                )
-                evaluation = evaluation_data.build(
-                    EvaluationScheduleConfig,
-                    defaults={"every_steps": 100, "example_count": 256},
-                    fixed={"sampling": evaluation_sampling},
-                )
-                evaluation_data.finish()
-
-                artifacts_data = root.table("artifacts", required=True)
-                output_text = _nonempty_string(
-                    artifacts_data.take("output_root"), "artifacts.output_root"
-                )
-                output_root = Path(output_text).expanduser()
-                if not output_root.is_absolute():
-                    output_root = declaration_directory / output_root
-                output_root = output_root.resolve()
-                artifacts = artifacts_data.build(ArtifactConfig, fixed={"output_root": output_root})
-                artifacts_data.finish()
-
-                runtime_data = root.table("runtime")
-                runtime = runtime_data.build(RuntimeConfig)
-                runtime_data.finish()
-                root.finish()
-
-                return RunConfiguration(
-                    schema_version=schema_version,
-                    name=name,
-                    master_seed=seed,
-                    vocabulary=vocabulary,
-                    minimum_reason_tokens=minimum_reason_tokens,
-                    model=model,
-                    rollout=rollout,
-                    reward=reward,
-                    optimizer=optimizer,
-                    grpo=grpo,
-                    curriculum=curriculum,
-                    training=training,
-                    evaluation=evaluation,
-                    artifacts=artifacts,
-                    runtime=runtime,
-                    algorithm=algorithm,
-                    ppo=ppo,
-                )
   - id: 019ff5c5-0a59-71ac-8627-7415923ba6a7
     selector:
       quote: The reward section independently declares `coverage_coefficient`, `sterile_repetition_coefficient`,
@@ -540,6 +413,24 @@ anchors:
     links:
       - id: 019ff06a-a005-793f-92cd-fda20e6db21c
         kind: informational
+  - id: 019ff54c-87f7-720c-9062-62c09a55bf81
+    selector:
+      quote: Loading converts the TOML data into typed configurations. It validates the selected
+        algorithm, applies PPO defaults for clipping, discount, trace decay, value and entropy
+        coefficients, epochs, microbatching, and disabled all-zero-reward policy suppression,
+        and applies the GRPO group-size compatibility rule only when GRPO is selected. The
+        PPO section may enable `suppress_zero_reward_policy_updates` as a boolean. Unknown
+        keys, invalid types, impossible completion budgets, and incompatible settings are
+        rejected before a model or run directory is created.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 01a014d0-551f-70ba-aa9e-735ba3946122
+        selector:
+          quote: |-
+            def resolve_run_configuration(
+                declaration: Mapping[str, Any], *, declaration_directory: Path
+            ) -> RunConfiguration:
 references:
   - id: 019febb9-f9e2-7ed2-8b6d-d45fd579661c
     kind: contractual

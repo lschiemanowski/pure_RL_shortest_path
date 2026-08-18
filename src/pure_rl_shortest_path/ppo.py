@@ -48,8 +48,11 @@ class PPOConfig:
     valid_coefficient: float = 0.0
     gradient_clip: float = 1.0
     advantage_epsilon: float = 1e-6
+    suppress_zero_reward_policy_updates: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.suppress_zero_reward_policy_updates, bool):
+            raise TypeError("suppress_zero_reward_policy_updates must be a boolean")
         for name in ("update_epochs", "microbatch_size"):
             object.__setattr__(self, name, _positive_int(getattr(self, name), name))
         for name in ("gamma", "gae_lambda"):
@@ -334,6 +337,10 @@ def ppo_update(
     )
     if action_count == 0:
         raise ValueError("PPO batch must contain sampled actions")
+    suppress_policy_update = (
+        config.suppress_zero_reward_policy_updates
+        and not bool(batch.packed.rewards.ne(0).any())
+    )
     totals = {
         name: 0.0
         for name in (
@@ -379,7 +386,10 @@ def ppo_update(
                 surrogate = torch.minimum(
                     ratio * chunk.advantages, clipped_ratio * chunk.advantages
                 )
-                policy_loss = -surrogate[packed.action_mask].sum() / action_count
+                if suppress_policy_update:
+                    policy_loss = surrogate[packed.action_mask].sum() * 0.0
+                else:
+                    policy_loss = -surrogate[packed.action_mask].sum() / action_count
 
                 value_error = (values - chunk.returns).square()
                 if config.value_clip_epsilon is not None:
