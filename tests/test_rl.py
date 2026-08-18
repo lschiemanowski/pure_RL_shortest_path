@@ -280,6 +280,22 @@ class AuxiliaryObjectiveTests(unittest.TestCase):
         self.assertEqual(valid[4], frozenset({self.token(self.source)}))
         self.assertNotIn(self.token(self.source), valid[6])
 
+    def test_minimum_reasoning_length_delays_end_reason(self) -> None:
+        target = self.example.label_by_vertex[4]
+        completion = (
+            self.token(self.neighbor),
+            self.token(target),
+            END_REASON,
+        )
+        valid = valid_next_token_sets(
+            self.example,
+            completion,
+            self.vocabulary,
+            minimum_reason_tokens=2,
+        )
+        self.assertNotIn(END_REASON, valid[1])
+        self.assertIn(END_REASON, valid[2])
+
     def test_packing_marks_only_sampled_completion_tokens_as_actions(self) -> None:
         path = labeled_path(self.example, (0, 1, 4))
         completion = completion_for(self.vocabulary, path, path)

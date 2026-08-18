@@ -31,6 +31,13 @@ covers:
             @property
             def shortest_path_success(self) -> float:
                 return self.shortest_path_successes / self.example_count
+      prefix: |+
+        s,
+                stage_counts=tuple(counts),
+                frontier=state.frontier,
+            )
+
+
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
       quote: |-

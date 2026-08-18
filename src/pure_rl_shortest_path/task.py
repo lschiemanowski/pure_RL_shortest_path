@@ -346,10 +346,17 @@ def _format_failure(reason: str) -> ParsedCompletion:
 
 
 def parse_completion(
-    completion: Sequence[int], vocabulary: Vocabulary
+    completion: Sequence[int],
+    vocabulary: Vocabulary,
+    minimum_reason_tokens: int = 1,
 ) -> ParsedCompletion:
     """Parse generated tokens without consulting a graph or judging correctness."""
 
+    minimum_reason_tokens = _plain_int(
+        minimum_reason_tokens, "minimum_reason_tokens"
+    )
+    if minimum_reason_tokens < 1:
+        raise ValueError("minimum_reason_tokens must be positive")
     tokens = list(completion)
     if not tokens or tokens[-1] != EOS or EOS in tokens[:-1]:
         return _format_failure("completion must end with exactly one EOS")
@@ -358,8 +365,10 @@ def parse_completion(
     except ValueError:
         return _format_failure("completion has no END_REASON")
     reasoning_tokens = tokens[:end_reason]
-    if not reasoning_tokens:
-        return _format_failure("reasoning segment must be nonempty")
+    if len(reasoning_tokens) < minimum_reason_tokens:
+        return _format_failure(
+            "reasoning segment is shorter than minimum_reason_tokens"
+        )
 
     walks: list[tuple[int, ...]] = []
     current_walk: list[int] = []
@@ -499,11 +508,12 @@ def verify_completion(
     example: GraphExample,
     completion: Sequence[int],
     vocabulary: Vocabulary,
+    minimum_reason_tokens: int = 1,
 ) -> OutcomeFacts:
     """Derive exact task facts without assigning a scalar learning reward."""
 
     shortest_distance = _shortest_labeled_distance(example)
-    parsed = parse_completion(completion, vocabulary)
+    parsed = parse_completion(completion, vocabulary, minimum_reason_tokens)
     if not parsed.format_ok:
         return OutcomeFacts(parsed, False, None, shortest_distance, False, None, None)
 

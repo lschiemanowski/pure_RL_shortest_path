@@ -34,6 +34,11 @@ covers:
                 object.__setattr__(self, "generation_batch_size", batch_size)
                 object.__setattr__(self, "temperature", temperature)
                 object.__setattr__(self, "top_p", top_p)
+      prefix: |2+
+         raise ValueError(f"{name} must be finite and nonnegative")
+            return result
+
+
   - path: src/pure_rl_shortest_path/rl.py
     selector:
       quote: |-

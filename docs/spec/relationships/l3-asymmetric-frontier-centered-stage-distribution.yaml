@@ -22,6 +22,12 @@ covers:
             if not math.isfinite(result) or result <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
             return result
+      prefix: |2+
+         int):
+                raise TypeError(f"{name} must be an integer")
+            return value
+
+
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
       quote: |-

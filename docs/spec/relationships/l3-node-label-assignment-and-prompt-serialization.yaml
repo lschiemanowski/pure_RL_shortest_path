@@ -63,6 +63,12 @@ covers:
                 prompt=tuple(prompt),
                 adjacency=tuple(frozenset(neighbors) for neighbors in adjacency_mutable),
             )
+      prefix: |+
+        g.label} after "
+                f"{config.generation_attempts} graph attempts"
+            )
+
+
 anchors:
   - id: 019ff0e2-9b56-71ed-91e7-df7ad52bd1e7
     selector:

@@ -12,6 +12,7 @@ covers:
             example: GraphExample,
             completion: Sequence[int],
             vocabulary: Vocabulary,
+            minimum_reason_tokens: int = 1,
         ) -> tuple[frozenset[int], ...]:
             """Return every locally legal next-token set along a sampled completion.
 
@@ -19,6 +20,9 @@ covers:
             leaves its state unchanged.  It never changes the actual completion.
             """
 
+            minimum_reason_tokens = _positive_int(
+                minimum_reason_tokens, "minimum_reason_tokens"
+            )
             results: list[frozenset[int]] = []
             active_tokens = {
                 vocabulary.node_token(label) for label in example.active_labels
@@ -27,7 +31,7 @@ covers:
             current = example.source
             after_jump = False
             walk_edges = 0
-            legal_reasoning_moves = 0
+            accepted_reasoning_tokens = 0
             visited_answer_nodes: set[int] = set()
 
             for action in completion:
@@ -41,7 +45,7 @@ covers:
                         }
                         if walk_edges > 0:
                             valid.add(JUMP)
-                        if legal_reasoning_moves > 0:
+                        if accepted_reasoning_tokens >= minimum_reason_tokens:
                             valid.add(END_REASON)
                 elif state == "begin_answer":
                     valid = {BEGIN_ANSWER}
@@ -72,8 +76,10 @@ covers:
                         current = label
                         after_jump = False
                         walk_edges = 0
+                        accepted_reasoning_tokens += 1
                     elif action == JUMP:
                         after_jump = True
+                        accepted_reasoning_tokens += 1
                     elif action == END_REASON:
                         state = "begin_answer"
                     else:
@@ -81,7 +87,7 @@ covers:
                         assert label is not None
                         current = label
                         walk_edges += 1
-                        legal_reasoning_moves += 1
+                        accepted_reasoning_tokens += 1
                 elif state == "begin_answer":
                     state = "answer_source"
                 elif state == "answer_source":
@@ -106,12 +112,14 @@ anchors:
       quote: |-
         An auxiliary graph-aware state machine computes a set \(V_t\) of locally valid
         actions before each sampled completion token. During reasoning, legal actions
-        are graph neighbors of the current node, a restart marker after a nonempty walk,
-        and the end-reasoning marker after at least one legal reasoning move. A restart
-        must be followed by any active node label. The answer protocol then requires the
-        begin-answer marker, the query source, unvisited graph neighbors forming a
-        simple path, the end-answer marker upon reaching the target, and finally the
-        termination symbol.
+        are graph neighbors of the current node and a restart marker after a nonempty
+        walk. The end-reasoning marker becomes legal only after at least the declared
+        positive `minimum_reason_tokens` reasoning actions have been accepted.
+        Accepted node labels and restart markers count toward that threshold; rejected
+        sampled actions do not. A restart must be followed by any active node label. The
+        answer protocol then requires the begin-answer marker, the query source,
+        unvisited graph neighbors forming a simple path, the end-answer marker upon
+        reaching the target, and finally the termination symbol.
     links:
       - path: src/pure_rl_shortest_path/rl.py
         kind: contractual
@@ -124,7 +132,7 @@ anchors:
                             }
                             if walk_edges > 0:
                                 valid.add(JUMP)
-                            if legal_reasoning_moves > 0:
+                            if accepted_reasoning_tokens >= minimum_reason_tokens:
                                 valid.add(END_REASON)
   - id: 019ff1ac-85fb-7c7a-8cfd-2d27f9ee7483
     selector:
@@ -155,7 +163,8 @@ anchors:
 
         It rewards probability mass on the complete valid set rather than demonstrating
         one target action or shortest path. Its coefficient is independently
-        configurable and may be zero.
+        configurable and may be zero. The valid set uses the same declared completion
+        protocol as deterministic verification.
     links:
       - id: 019fef85-58fe-769d-b675-e1466eae3bff
         kind: informational

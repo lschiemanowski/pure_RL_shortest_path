@@ -13,6 +13,7 @@ covers:
             vocabulary: Vocabulary,
             *,
             device: torch.device,
+            minimum_reason_tokens: int = 1,
         ) -> PackedRollouts:
             """Pack prompts and sampled actions without creating target completions."""
 
@@ -39,7 +40,10 @@ covers:
                 first_action = len(rollout.example.prompt) - 1
                 action_mask[row, first_action : length - 1] = True
                 valid_sets = valid_next_token_sets(
-                    rollout.example, rollout.completion, vocabulary
+                    rollout.example,
+                    rollout.completion,
+                    vocabulary,
+                    minimum_reason_tokens,
                 )
                 for completion_index, valid in enumerate(valid_sets):
                     if valid:

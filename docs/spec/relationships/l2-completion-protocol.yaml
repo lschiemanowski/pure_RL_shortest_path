@@ -7,22 +7,20 @@ parent: 019feb9e-e54d-76f8-a696-ed88088bfaab
 anchors:
   - id: 019febb9-f9e2-73ef-91ad-b5489893d15f
     selector:
-      quote: |-
-        A completion contains a reasoning segment followed by a final-answer segment
-        and explicit termination. The reasoning segment represents one or more graph
-        walks separated by restart markers, while the final answer is a nonempty
-        sequence of node labels intended to describe a path from the query source to
-        its target.
+      quote: A completion contains a reasoning segment followed by a final-answer segment
+        and explicit termination. The reasoning segment contains at least the configured positive
+        minimum number of tokens and represents one or more graph walks separated by restart
+        markers. The final answer is a nonempty sequence of node labels intended to describe
+        a path from the query source to its target.
     links:
       - id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
         kind: informational
   - id: 019febb9-f9e2-7a6a-8375-c4a99c0d8418
     selector:
-      quote: |-
-        Parsing either returns the reasoning walks and answer path in structured form
-        or reports a format failure. It determines only syntactic well-formedness;
-        whether transitions are legal and whether the answer is correct or shortest
-        belong to outcome verification.
+      quote: Parsing either returns the reasoning walks and answer path in structured form
+        or reports a format failure, including when the reasoning segment is shorter than
+        the declared minimum. It determines only syntactic well-formedness; whether transitions
+        are legal and whether the answer is correct or shortest belong to outcome verification.
     links:
       - id: 019ff0e2-9b56-72d2-819b-b7c226edcd0d
         kind: informational

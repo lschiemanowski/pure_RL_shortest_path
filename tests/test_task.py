@@ -198,6 +198,18 @@ class CompletionAndVerificationTests(unittest.TestCase):
             with self.subTest(completion=completion):
                 self.assertFalse(parse_completion(completion, self.vocabulary).format_ok)
 
+    def test_declared_minimum_reasoning_length_is_part_of_verification(self) -> None:
+        path = self.shortest_path()
+        completion = self.completion(path[1:], path)
+        minimum = len(path[1:]) + 1
+        parsed = parse_completion(completion, self.vocabulary, minimum)
+        facts = verify_completion(
+            self.example, completion, self.vocabulary, minimum
+        )
+        self.assertFalse(parsed.format_ok)
+        self.assertIn("minimum_reason_tokens", parsed.format_error or "")
+        self.assertFalse(facts.format_ok)
+
     def test_verifier_recognizes_shortest_path_and_reasoning_coverage(self) -> None:
         path = self.shortest_path()
         completion = self.completion(path[1:], path)

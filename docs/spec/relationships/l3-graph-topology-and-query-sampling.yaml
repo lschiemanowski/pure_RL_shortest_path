@@ -48,6 +48,12 @@ covers:
                     else f"{self.min_distance}-{self.max_distance}"
                 )
                 return f"n{self.vertices}_e{self.edges}_d{distance}"
+      prefix: |2+
+         int):
+                raise TypeError(f"{name} must be an integer")
+            return value
+
+
   - path: src/pure_rl_shortest_path/task.py
     selector:
       quote: |-

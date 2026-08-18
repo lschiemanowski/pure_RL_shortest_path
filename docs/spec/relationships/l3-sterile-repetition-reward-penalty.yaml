@@ -16,6 +16,12 @@ covers:
             off_answer_legal_transitions: int
             sterile_repetitions_off_answer: int
             repetition_rate_off_answer: float
+      prefix: |+
+        fficient: float
+            sterile_repetition_penalty: float
+            total_reward: float
+
+
   - path: src/pure_rl_shortest_path/rl.py
     selector:
       quote: |-

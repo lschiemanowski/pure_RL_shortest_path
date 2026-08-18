@@ -13,6 +13,7 @@ covers:
             policy_checkpoint: str
             sampling: EvaluationSamplingConfig
             sampling_seed: int | None = None
+            minimum_reason_tokens: int = 1
             intervention_id: str | None = None
             comparison_condition: str | None = None
 
@@ -24,6 +25,12 @@ covers:
                     raise ValueError("policy_checkpoint must be a nonempty string")
                 if not isinstance(self.sampling, EvaluationSamplingConfig):
                     raise TypeError("sampling must be an EvaluationSamplingConfig")
+                minimum_reason_tokens = _positive_int(
+                    self.minimum_reason_tokens, "minimum_reason_tokens"
+                )
+                object.__setattr__(
+                    self, "minimum_reason_tokens", minimum_reason_tokens
+                )
                 if self.sampling.mode == "greedy":
                     if self.sampling_seed is not None:
                         raise ValueError("greedy evaluation does not use a sampling seed")
@@ -104,7 +111,10 @@ covers:
                 EvaluationCaseResult(
                     completion=completion,
                     outcome=verify_completion(
-                        completion.example, completion.completion, vocabulary
+                        completion.example,
+                        completion.completion,
+                        vocabulary,
+                        protocol.minimum_reason_tokens,
                     ),
                 )
                 for completion in completions
@@ -182,9 +192,10 @@ anchors:
       quote: |-
         An evaluation protocol identifies the policy checkpoint and complete
         completion-sampling configuration, including the sampling seed for a stochastic
-        evaluation. Ordinary and intervention evaluations are distinct. An intervention
-        protocol must identify both the intervention and its comparison condition;
-        ordinary evaluation refuses to apply an implicit intervention.
+        evaluation and the positive minimum number of reasoning tokens required by the
+        completion protocol. Ordinary and intervention evaluations are distinct. An
+        intervention protocol must identify both the intervention and its comparison
+        condition; ordinary evaluation refuses to apply an implicit intervention.
     links:
       - path: src/pure_rl_shortest_path/experiment.py
         kind: contractual
@@ -203,11 +214,11 @@ anchors:
       quote: |-
         Aggregation requires exactly one completion for each problem in the evaluation
         set and preserves their order. It parses and verifies each completion using the
-        same task implementation used by training. The primary result records the
-        evaluation denominator and exact formatting-success, valid-path-success, and
-        shortest-path-success counts together with their rates. Mean path length and
-        mean excess length are computed only over valid paths and remain secondary
-        diagnostics.
+        same task implementation and declared minimum-reasoning requirement used by
+        training. The primary result records the evaluation denominator and exact
+        formatting-success, valid-path-success, and shortest-path-success counts
+        together with their rates. Mean path length and mean excess length are computed
+        only over valid paths and remain secondary diagnostics.
     links:
       - path: src/pure_rl_shortest_path/experiment.py
         kind: contractual

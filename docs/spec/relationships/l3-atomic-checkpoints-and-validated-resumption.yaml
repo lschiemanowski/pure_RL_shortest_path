@@ -123,6 +123,13 @@ covers:
 
             if requested.vocabulary != checkpoint.configuration.vocabulary:
                 raise ValueError("requested task vocabulary is incompatible with checkpoint")
+            if (
+                requested.minimum_reason_tokens
+                != checkpoint.configuration.minimum_reason_tokens
+            ):
+                raise ValueError(
+                    "requested completion protocol is incompatible with checkpoint"
+                )
             if requested.model != checkpoint.configuration.model:
                 raise ValueError("requested model architecture is incompatible with checkpoint")
             if requested.master_seed != checkpoint.configuration.master_seed:
@@ -220,9 +227,10 @@ anchors:
       quote: |-
         Loading validates the checkpoint schema and configuration digest. Same-run
         resumption requires the recorded configuration and originating source revision;
-        an operational stopping-step override is recorded separately. A derived run
-        may change future training settings, but it retains parent lineage and rejects
-        changes to the task vocabulary, model architecture, master seed, or ordered
+        an operational stopping-step override is recorded separately. A derived run may
+        change future training settings, but it retains parent lineage and rejects
+        changes to the task vocabulary, completion protocol including its
+        minimum-reasoning requirement, model architecture, master seed, or ordered
         curriculum stages.
     links:
       - path: src/pure_rl_shortest_path/run.py
@@ -232,6 +240,13 @@ anchors:
           quote: |2-
                 if requested.vocabulary != checkpoint.configuration.vocabulary:
                     raise ValueError("requested task vocabulary is incompatible with checkpoint")
+                if (
+                    requested.minimum_reason_tokens
+                    != checkpoint.configuration.minimum_reason_tokens
+                ):
+                    raise ValueError(
+                        "requested completion protocol is incompatible with checkpoint"
+                    )
                 if requested.model != checkpoint.configuration.model:
                     raise ValueError("requested model architecture is incompatible with checkpoint")
                 if requested.master_seed != checkpoint.configuration.master_seed:

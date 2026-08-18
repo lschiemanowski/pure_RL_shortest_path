@@ -14,9 +14,10 @@ that update is interrupted.
 
 Loading validates the checkpoint schema and configuration digest. Same-run
 resumption requires the recorded configuration and originating source revision;
-an operational stopping-step override is recorded separately. A derived run
-may change future training settings, but it retains parent lineage and rejects
-changes to the task vocabulary, model architecture, master seed, or ordered
+an operational stopping-step override is recorded separately. A derived run may
+change future training settings, but it retains parent lineage and rejects
+changes to the task vocabulary, completion protocol including its
+minimum-reasoning requirement, model architecture, master seed, or ordered
 curriculum stages.
 
 After validation, resumption restores the current and reference policies,

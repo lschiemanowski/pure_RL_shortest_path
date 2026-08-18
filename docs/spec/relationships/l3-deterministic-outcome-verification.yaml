@@ -67,11 +67,12 @@ covers:
             example: GraphExample,
             completion: Sequence[int],
             vocabulary: Vocabulary,
+            minimum_reason_tokens: int = 1,
         ) -> OutcomeFacts:
             """Derive exact task facts without assigning a scalar learning reward."""
 
             shortest_distance = _shortest_labeled_distance(example)
-            parsed = parse_completion(completion, vocabulary)
+            parsed = parse_completion(completion, vocabulary, minimum_reason_tokens)
             if not parsed.format_ok:
                 return OutcomeFacts(parsed, False, None, shortest_distance, False, None, None)
 

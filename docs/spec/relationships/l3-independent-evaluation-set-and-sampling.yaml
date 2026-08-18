@@ -12,6 +12,14 @@ covers:
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(f"{name} must be an integer")
             return value
+      prefix: |2+
+         OutcomeFacts,
+            Vocabulary,
+            generate_example,
+            verify_completion,
+        )
+
+
   - path: src/pure_rl_shortest_path/experiment.py
     selector:
       quote: |-

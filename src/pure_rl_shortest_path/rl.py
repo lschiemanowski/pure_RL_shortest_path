@@ -279,12 +279,18 @@ def evaluate_samples(
     coverage_coefficient: float = 0.0,
     sterile_repetition_coefficient: float = 0.0,
     sterile_repetition_mode: Literal["all", "off_answer"] = "off_answer",
+    minimum_reason_tokens: int = 1,
 ) -> list[Rollout]:
     """Verify sampled completions and attach their separately recorded rewards."""
 
     rollouts: list[Rollout] = []
     for sample in samples:
-        outcome = verify_completion(sample.example, sample.completion, vocabulary)
+        outcome = verify_completion(
+            sample.example,
+            sample.completion,
+            vocabulary,
+            minimum_reason_tokens,
+        )
         rollouts.append(
             Rollout(
                 sample,
@@ -304,6 +310,7 @@ def valid_next_token_sets(
     example: GraphExample,
     completion: Sequence[int],
     vocabulary: Vocabulary,
+    minimum_reason_tokens: int = 1,
 ) -> tuple[frozenset[int], ...]:
     """Return every locally legal next-token set along a sampled completion.
 
@@ -311,6 +318,9 @@ def valid_next_token_sets(
     leaves its state unchanged.  It never changes the actual completion.
     """
 
+    minimum_reason_tokens = _positive_int(
+        minimum_reason_tokens, "minimum_reason_tokens"
+    )
     results: list[frozenset[int]] = []
     active_tokens = {
         vocabulary.node_token(label) for label in example.active_labels
@@ -319,7 +329,7 @@ def valid_next_token_sets(
     current = example.source
     after_jump = False
     walk_edges = 0
-    legal_reasoning_moves = 0
+    accepted_reasoning_tokens = 0
     visited_answer_nodes: set[int] = set()
 
     for action in completion:
@@ -333,7 +343,7 @@ def valid_next_token_sets(
                 }
                 if walk_edges > 0:
                     valid.add(JUMP)
-                if legal_reasoning_moves > 0:
+                if accepted_reasoning_tokens >= minimum_reason_tokens:
                     valid.add(END_REASON)
         elif state == "begin_answer":
             valid = {BEGIN_ANSWER}
@@ -364,8 +374,10 @@ def valid_next_token_sets(
                 current = label
                 after_jump = False
                 walk_edges = 0
+                accepted_reasoning_tokens += 1
             elif action == JUMP:
                 after_jump = True
+                accepted_reasoning_tokens += 1
             elif action == END_REASON:
                 state = "begin_answer"
             else:
@@ -373,7 +385,7 @@ def valid_next_token_sets(
                 assert label is not None
                 current = label
                 walk_edges += 1
-                legal_reasoning_moves += 1
+                accepted_reasoning_tokens += 1
         elif state == "begin_answer":
             state = "answer_source"
         elif state == "answer_source":
@@ -421,6 +433,7 @@ def pack_rollouts(
     vocabulary: Vocabulary,
     *,
     device: torch.device,
+    minimum_reason_tokens: int = 1,
 ) -> PackedRollouts:
     """Pack prompts and sampled actions without creating target completions."""
 
@@ -447,7 +460,10 @@ def pack_rollouts(
         first_action = len(rollout.example.prompt) - 1
         action_mask[row, first_action : length - 1] = True
         valid_sets = valid_next_token_sets(
-            rollout.example, rollout.completion, vocabulary
+            rollout.example,
+            rollout.completion,
+            vocabulary,
+            minimum_reason_tokens,
         )
         for completion_index, valid in enumerate(valid_sets):
             if valid:

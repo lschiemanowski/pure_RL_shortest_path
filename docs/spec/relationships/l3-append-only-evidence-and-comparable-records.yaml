@@ -118,6 +118,7 @@ covers:
                 "total_loss": update.total_loss,
                 "kl_coefficient": configuration.grpo.kl_coefficient,
                 "valid_coefficient": configuration.grpo.valid_coefficient,
+                "minimum_reason_tokens": configuration.minimum_reason_tokens,
                 "zero_variance_group_fraction": update.zero_variance_group_fraction,
                 "gradient_norm": update.gradient_norm,
                 "sampling": _plain_data(configuration.rollout),
@@ -137,6 +138,7 @@ covers:
                 "problem_config": _plain_data(result.problem_config),
                 "sampling": _plain_data(result.protocol.sampling),
                 "sampling_seed": result.protocol.sampling_seed,
+                "minimum_reason_tokens": result.protocol.minimum_reason_tokens,
                 "protocol_kind": result.protocol.kind,
                 "metrics": _plain_data(result.metrics),
             }
@@ -187,9 +189,10 @@ anchors:
         Training writes schema-versioned JSON Lines records by appending complete
         records and synchronizing them to disk. Every event identifies its run,
         completed step, and resolved-configuration digest. Training records retain the
-        realized curriculum mixture, exact rollout outcome counts, separate base,
-        coverage, and total rewards, separate policy, KL, and valid-next loss terms,
-        their coefficients and denominators, and optimizer diagnostics.
+        declared minimum-reasoning requirement, realized curriculum mixture, exact
+        rollout outcome counts, separate base, coverage, and total rewards, separate
+        policy, KL, and valid-next loss terms, their coefficients and denominators, and
+        optimizer diagnostics.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -235,10 +238,10 @@ anchors:
     selector:
       quote: |-
         Independent evaluation records retain the policy identity, graph-problem and
-        problem-set identities, sampling protocol, and exact format, valid-path, and
-        shortest-path counts and rates. Curriculum decisions and reference-policy
-        updates are distinct lifecycle events rather than being inferred from nearby
-        measurements.
+        problem-set identities, sampling protocol, declared minimum-reasoning
+        requirement, and exact format, valid-path, and shortest-path counts and rates.
+        Curriculum decisions and reference-policy updates are distinct lifecycle events
+        rather than being inferred from nearby measurements.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -252,6 +255,7 @@ anchors:
                     "problem_config": _plain_data(result.problem_config),
                     "sampling": _plain_data(result.protocol.sampling),
                     "sampling_seed": result.protocol.sampling_seed,
+                    "minimum_reason_tokens": result.protocol.minimum_reason_tokens,
                     "protocol_kind": result.protocol.kind,
                     "metrics": _plain_data(result.metrics),
                 }

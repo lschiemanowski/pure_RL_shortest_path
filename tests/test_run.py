@@ -34,6 +34,7 @@ seed = 17
 
 [task]
 node_label_count = 12
+minimum_reason_tokens = 4
 
 [model]
 max_context_length = 128
@@ -104,7 +105,7 @@ def fast_config() -> str:
         BASE_CONFIG.replace("max_context_length = 128", "max_context_length = 64")
         .replace("layers = 2", "layers = 1")
         .replace("group_size = 4", "group_size = 2")
-        .replace("max_new_tokens = 32", "max_new_tokens = 8")
+        .replace("max_new_tokens = 32", "max_new_tokens = 12")
         .replace(
             "learning_rate = 3e-4\n",
             "learning_rate = 3e-4\nupdate_epochs = 1\nmicrobatch_size = 2\n",
@@ -144,6 +145,7 @@ class RunConfigurationTests(unittest.TestCase):
 
             self.assertEqual(loaded.resolved.schema_version, CONFIG_SCHEMA_VERSION)
             self.assertEqual(loaded.resolved.vocabulary.node_label_count, 12)
+            self.assertEqual(loaded.resolved.minimum_reason_tokens, 4)
             self.assertEqual(loaded.resolved.model.vocab_size, 22)
             self.assertEqual(loaded.resolved.model.n_layers, 2)
             self.assertEqual(loaded.resolved.rollout.temperature, 1.0)
@@ -437,6 +439,13 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "model architecture"):
                 validate_resume_configuration(
                     checkpoint, changed_model, derived_run=True
+                )
+            changed_protocol = replace(
+                loaded.resolved, minimum_reason_tokens=3
+            )
+            with self.assertRaisesRegex(ValueError, "completion protocol"):
+                validate_resume_configuration(
+                    checkpoint, changed_protocol, derived_run=True
                 )
             self.assertIn(
                 "reward.coverage_coefficient",

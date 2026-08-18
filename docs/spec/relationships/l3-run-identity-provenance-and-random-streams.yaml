@@ -16,6 +16,10 @@ covers:
             "evaluation_problems",
             "evaluation_sampling",
         )
+      prefix: |
+        IG_SCHEMA_VERSION = 1
+        CHECKPOINT_SCHEMA_VERSION = 2
+        EVIDENCE_SCHEMA_VERSION = 2
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |-

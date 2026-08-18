@@ -7,12 +7,11 @@ parent: 019feb9e-e54d-7450-bdf0-d2831a73da31
 anchors:
   - id: 019ff06a-a006-77e7-a6c7-d3e2119ff2b5
     selector:
-      quote: |-
-        A run configuration resolves the task distribution and vocabulary, transformer
-        architecture, rollout and optimization settings, reward and auxiliary-learning
-        signals, curriculum, evaluation schedule, and artifact locations before
-        training begins. Invalid or mutually incompatible settings are rejected before
-        model updates occur.
+      quote: A run configuration resolves the task distribution, vocabulary, completion protocol
+        including its minimum reasoning length, transformer architecture, rollout and optimization
+        settings, reward and auxiliary-learning signals, curriculum, evaluation schedule,
+        and artifact locations before training begins. Invalid or mutually incompatible settings
+        are rejected before model updates occur.
     links:
       - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
         kind: informational
@@ -22,12 +21,11 @@ anchors:
         kind: informational
   - id: 019ff06a-a006-7aca-b501-77212fef2402
     selector:
-      quote: |-
-        Each run records its resolved configuration, random seeds, source revision, and
-        a stable run identity. Independent random streams are used for training-problem
-        generation and evaluation-problem generation. A resumed or derived run records
-        its relationship to the originating run and checkpoint rather than presenting
-        itself as an unrelated experiment.
+      quote: Each run records its resolved configuration, random seeds, source revision, and
+        a stable run identity. Independent random streams are used for training-problem generation
+        and evaluation-problem generation. A resumed or derived run records its relationship
+        to the originating run and checkpoint rather than presenting itself as an unrelated
+        experiment.
     links:
       - id: 019feb9e-e54d-7450-bdf0-d2831a73da31
         kind: informational
@@ -35,11 +33,9 @@ anchors:
         kind: informational
   - id: 019ff5c5-0a59-7e9d-a52e-c7e0306290d8
     selector:
-      quote: |-
-        Sterile-repetition shaping is declared by an independently named nonnegative
-        coefficient and an explicit choice between all-transition and off-answer mode.
-        A zero coefficient disables its effect on reward without disabling either
-        diagnostic.
+      quote: Sterile-repetition shaping is declared by an independently named nonnegative
+        coefficient and an explicit choice between all-transition and off-answer mode. A zero
+        coefficient disables its effect on reward without disabling either diagnostic.
     links:
       - id: 019ff54c-87f7-704a-b05e-fb972cc40380
         kind: informational

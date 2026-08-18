@@ -472,6 +472,7 @@ class EvaluationProtocol:
     policy_checkpoint: str
     sampling: EvaluationSamplingConfig
     sampling_seed: int | None = None
+    minimum_reason_tokens: int = 1
     intervention_id: str | None = None
     comparison_condition: str | None = None
 
@@ -483,6 +484,12 @@ class EvaluationProtocol:
             raise ValueError("policy_checkpoint must be a nonempty string")
         if not isinstance(self.sampling, EvaluationSamplingConfig):
             raise TypeError("sampling must be an EvaluationSamplingConfig")
+        minimum_reason_tokens = _positive_int(
+            self.minimum_reason_tokens, "minimum_reason_tokens"
+        )
+        object.__setattr__(
+            self, "minimum_reason_tokens", minimum_reason_tokens
+        )
         if self.sampling.mode == "greedy":
             if self.sampling_seed is not None:
                 raise ValueError("greedy evaluation does not use a sampling seed")
@@ -559,7 +566,10 @@ def aggregate_evaluation_outcomes(
         EvaluationCaseResult(
             completion=completion,
             outcome=verify_completion(
-                completion.example, completion.completion, vocabulary
+                completion.example,
+                completion.completion,
+                vocabulary,
+                protocol.minimum_reason_tokens,
             ),
         )
         for completion in completions

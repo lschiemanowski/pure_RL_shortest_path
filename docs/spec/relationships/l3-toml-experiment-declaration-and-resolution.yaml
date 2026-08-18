@@ -103,6 +103,7 @@ covers:
             name: str
             master_seed: int
             vocabulary: Vocabulary
+            minimum_reason_tokens: int
             model: TransformerConfig
             rollout: RolloutSamplingConfig
             reward: RewardConfig
@@ -123,6 +124,9 @@ covers:
                     )
                 name = _nonempty_string(self.name, "name")
                 seed = _seed(self.master_seed, "seed")
+                minimum_reason_tokens = _positive_int(
+                    self.minimum_reason_tokens, "task.minimum_reason_tokens"
+                )
                 largest_graph = max(stage.vertices for stage in self.curriculum.stages)
                 if self.vocabulary.node_label_count < largest_graph:
                     raise ConfigurationError(
@@ -146,9 +150,21 @@ covers:
                         "model.max_context_length is smaller than the largest configured "
                         "prompt plus completion budget"
                     )
+                minimum_completion = minimum_reason_tokens + 5
+                if min(
+                    self.rollout.max_new_tokens,
+                    self.evaluation.sampling.max_new_tokens,
+                ) < minimum_completion:
+                    raise ConfigurationError(
+                        "completion budgets must fit the minimum reasoning segment and "
+                        "the shortest well-formed answer"
+                    )
                 object.__setattr__(self, "schema_version", version)
                 object.__setattr__(self, "name", name)
                 object.__setattr__(self, "master_seed", seed)
+                object.__setattr__(
+                    self, "minimum_reason_tokens", minimum_reason_tokens
+                )
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |-
@@ -175,6 +191,7 @@ covers:
                 name=name,
                 master_seed=seed,
                 vocabulary=vocabulary,
+                minimum_reason_tokens=minimum_reason_tokens,
                 model=model,
                 rollout=rollout,
                 reward=reward,
@@ -213,12 +230,14 @@ anchors:
   - id: 019ff54c-87f7-74d5-9be7-8ff766f24cd3
     selector:
       quote: |-
-        A fresh training run begins from one versioned TOML experiment declaration.
-        Its named sections describe the task vocabulary, curriculum stages and mixture,
+        A fresh training run begins from one versioned TOML experiment declaration. Its
+        named sections describe the task vocabulary and positive
+        `minimum_reason_tokens` requirement, curriculum stages and mixture,
         transformer architecture, rollout collection, reward shaping, auxiliary
         objective, GRPO update, evaluation schedule, checkpoint schedule, runtime, and
-        artifact location. Ordered values such as curriculum stages retain their
-        declared order.
+        artifact location. The minimum-reasoning requirement defaults to one when
+        omitted for compatibility. Ordered values such as curriculum stages retain
+        their declared order.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -252,8 +271,10 @@ anchors:
         Loading converts the TOML data into the typed configurations used by the task,
         policy, trainer, curriculum, and evaluation implementations. Unknown keys,
         missing required values, invalid types, and mutually incompatible settings are
-        rejected before a model or run directory is created. Defaults inserted during
-        resolution become explicit in the resolved configuration.
+        rejected before a model or run directory is created. Completion budgets must
+        accommodate the declared minimum reasoning segment plus the shortest
+        structurally valid answer. Defaults inserted during resolution become explicit
+        in the resolved configuration.
     links:
       - path: src/pure_rl_shortest_path/run.py
         kind: contractual
@@ -265,6 +286,7 @@ anchors:
                     name=name,
                     master_seed=seed,
                     vocabulary=vocabulary,
+                    minimum_reason_tokens=minimum_reason_tokens,
                     model=model,
                     rollout=rollout,
                     reward=reward,

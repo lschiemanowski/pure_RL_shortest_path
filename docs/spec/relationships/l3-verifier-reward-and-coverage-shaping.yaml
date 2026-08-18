@@ -28,6 +28,12 @@ covers:
                 else 0.0
             )
             return base_reward, coverage, coefficient, coefficient * coverage
+      prefix: |2+
+         @property
+            def group_id(self) -> int:
+                return self.sample.group_id
+
+
 anchors:
   - id: 019ff1ac-85fb-7d8c-afe9-e1a3b63e938b
     selector:

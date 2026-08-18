@@ -293,6 +293,7 @@ class RunConfiguration:
     name: str
     master_seed: int
     vocabulary: Vocabulary
+    minimum_reason_tokens: int
     model: TransformerConfig
     rollout: RolloutSamplingConfig
     reward: RewardConfig
@@ -313,6 +314,9 @@ class RunConfiguration:
             )
         name = _nonempty_string(self.name, "name")
         seed = _seed(self.master_seed, "seed")
+        minimum_reason_tokens = _positive_int(
+            self.minimum_reason_tokens, "task.minimum_reason_tokens"
+        )
         largest_graph = max(stage.vertices for stage in self.curriculum.stages)
         if self.vocabulary.node_label_count < largest_graph:
             raise ConfigurationError(
@@ -336,9 +340,21 @@ class RunConfiguration:
                 "model.max_context_length is smaller than the largest configured "
                 "prompt plus completion budget"
             )
+        minimum_completion = minimum_reason_tokens + 5
+        if min(
+            self.rollout.max_new_tokens,
+            self.evaluation.sampling.max_new_tokens,
+        ) < minimum_completion:
+            raise ConfigurationError(
+                "completion budgets must fit the minimum reasoning segment and "
+                "the shortest well-formed answer"
+            )
         object.__setattr__(self, "schema_version", version)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "master_seed", seed)
+        object.__setattr__(
+            self, "minimum_reason_tokens", minimum_reason_tokens
+        )
 
 
 @dataclass(frozen=True)
@@ -409,6 +425,9 @@ def resolve_run_configuration(
 
     task = root.table("task", required=True)
     vocabulary = Vocabulary(task.take("node_label_count"))
+    minimum_reason_tokens = _positive_int(
+        task.take("minimum_reason_tokens", 1), "task.minimum_reason_tokens"
+    )
     task.finish()
 
     model_data = root.table("model")
@@ -488,6 +507,7 @@ def resolve_run_configuration(
         name=name,
         master_seed=seed,
         vocabulary=vocabulary,
+        minimum_reason_tokens=minimum_reason_tokens,
         model=model,
         rollout=rollout,
         reward=reward,
@@ -782,6 +802,7 @@ def run_configuration_from_record(record: Mapping[str, Any]) -> RunConfiguration
         name=record["name"],
         master_seed=record["master_seed"],
         vocabulary=vocabulary,
+        minimum_reason_tokens=record.get("minimum_reason_tokens", 1),
         model=model,
         rollout=rollout,
         reward=reward,
@@ -1048,6 +1069,13 @@ def validate_resume_configuration(
 
     if requested.vocabulary != checkpoint.configuration.vocabulary:
         raise ValueError("requested task vocabulary is incompatible with checkpoint")
+    if (
+        requested.minimum_reason_tokens
+        != checkpoint.configuration.minimum_reason_tokens
+    ):
+        raise ValueError(
+            "requested completion protocol is incompatible with checkpoint"
+        )
     if requested.model != checkpoint.configuration.model:
         raise ValueError("requested model architecture is incompatible with checkpoint")
     if requested.master_seed != checkpoint.configuration.master_seed:
@@ -1193,6 +1221,7 @@ def training_evidence_payload(
         "total_loss": update.total_loss,
         "kl_coefficient": configuration.grpo.kl_coefficient,
         "valid_coefficient": configuration.grpo.valid_coefficient,
+        "minimum_reason_tokens": configuration.minimum_reason_tokens,
         "zero_variance_group_fraction": update.zero_variance_group_fraction,
         "gradient_norm": update.gradient_norm,
         "sampling": _plain_data(configuration.rollout),
@@ -1211,6 +1240,7 @@ def evaluation_evidence_payload(
         "problem_config": _plain_data(result.problem_config),
         "sampling": _plain_data(result.protocol.sampling),
         "sampling_seed": result.protocol.sampling_seed,
+        "minimum_reason_tokens": result.protocol.minimum_reason_tokens,
         "protocol_kind": result.protocol.kind,
         "metrics": _plain_data(result.metrics),
     }
@@ -1419,9 +1449,13 @@ def execute_training(
                 configuration.reward.coverage_coefficient,
                 configuration.reward.sterile_repetition_coefficient,
                 configuration.reward.sterile_repetition_mode,
+                configuration.minimum_reason_tokens,
             )
             packed = pack_rollouts(
-                rollouts, configuration.vocabulary, device=device
+                rollouts,
+                configuration.vocabulary,
+                device=device,
+                minimum_reason_tokens=configuration.minimum_reason_tokens,
             )
             update = grpo_update(
                 policy,
@@ -1486,6 +1520,9 @@ def execute_training(
                     policy_checkpoint=f"{run_id}:live-step-{step}",
                     sampling=configuration.evaluation.sampling,
                     sampling_seed=sampling_seed,
+                    minimum_reason_tokens=(
+                        configuration.minimum_reason_tokens
+                    ),
                 )
                 evaluation = run_evaluation(
                     policy,
@@ -1831,6 +1868,9 @@ def execute_standalone_evaluation(
             policy_checkpoint=str(checkpoint.path),
             sampling=declaration.sampling,
             sampling_seed=item.sampling_seed,
+            minimum_reason_tokens=(
+                checkpoint.configuration.minimum_reason_tokens
+            ),
         )
         result = run_evaluation(
             policy,

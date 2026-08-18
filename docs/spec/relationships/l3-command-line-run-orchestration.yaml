@@ -60,9 +60,13 @@ covers:
                         configuration.reward.coverage_coefficient,
                         configuration.reward.sterile_repetition_coefficient,
                         configuration.reward.sterile_repetition_mode,
+                        configuration.minimum_reason_tokens,
                     )
                     packed = pack_rollouts(
-                        rollouts, configuration.vocabulary, device=device
+                        rollouts,
+                        configuration.vocabulary,
+                        device=device,
+                        minimum_reason_tokens=configuration.minimum_reason_tokens,
                     )
                     update = grpo_update(
                         policy,
