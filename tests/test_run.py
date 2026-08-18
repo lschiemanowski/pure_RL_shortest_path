@@ -121,6 +121,24 @@ def fast_config() -> str:
     )
 
 
+def ppo_fast_config() -> str:
+    return (
+        fast_config()
+        .replace('name = "small-test"', 'name = "small-ppo-test"')
+        .replace("seed = 17\n", 'seed = 17\nalgorithm = "ppo"\n')
+        .replace("group_size = 2", "group_size = 1")
+        .replace(
+            "[training]\n",
+            "[ppo]\n"
+            "update_epochs = 1\n"
+            "microbatch_size = 1\n"
+            "gamma = 0.99\n"
+            "gae_lambda = 0.95\n\n"
+            "[training]\n",
+        )
+    )
+
+
 def run_git(repository: Path, *arguments: str) -> None:
     subprocess.run(
         ("git", *arguments),
@@ -157,6 +175,8 @@ class RunConfigurationTests(unittest.TestCase):
             )
             self.assertEqual(loaded.resolved.grpo.group_size, 4)
             self.assertEqual(loaded.resolved.grpo.valid_coefficient, 1.0)
+            self.assertEqual(loaded.resolved.algorithm, "grpo")
+            self.assertEqual(loaded.resolved.ppo.gae_lambda, 0.95)
             self.assertEqual(len(loaded.resolved.curriculum.stages), 2)
             self.assertEqual(loaded.resolved.evaluation.sampling.mode, "greedy")
             self.assertEqual(
@@ -447,10 +467,64 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
                 validate_resume_configuration(
                     checkpoint, changed_protocol, derived_run=True
                 )
+            changed_algorithm = replace(loaded.resolved, algorithm="ppo")
+            with self.assertRaisesRegex(ValueError, "optimization algorithm"):
+                validate_resume_configuration(
+                    checkpoint, changed_algorithm, derived_run=True
+                )
             self.assertIn(
                 "reward.coverage_coefficient",
                 configuration_differences(loaded.resolved, changed_reward),
             )
+
+    def test_ppo_checkpoint_evidence_and_resume_include_learned_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "ppo.toml"
+            path.write_text(ppo_fast_config(), encoding="utf-8")
+            loaded = load_run_configuration(path)
+            run_directory = root / "run"
+            run_directory.mkdir()
+            seeds = derive_named_seeds(loaded.resolved.master_seed)
+
+            first = execute_training(
+                run_directory=run_directory,
+                run_id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                configuration=loaded.resolved,
+                seeds=seeds,
+            )
+            checkpoint = load_training_checkpoint(first.final_checkpoint)
+            self.assertEqual(checkpoint.configuration.algorithm, "ppo")
+            self.assertIn("value_head", checkpoint.payload)
+
+            training_record = next(
+                json.loads(line)
+                for line in (run_directory / "metrics.jsonl").read_text().splitlines()
+                if json.loads(line)["kind"] == "training"
+            )
+            self.assertEqual(training_record["algorithm"], "ppo")
+            for field in (
+                "policy_loss",
+                "value_loss",
+                "entropy",
+                "clip_fraction",
+                "explained_variance",
+            ):
+                self.assertIn(field, training_record)
+
+            resumed = execute_training(
+                run_directory=run_directory,
+                run_id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                configuration=loaded.resolved,
+                seeds=seeds,
+                checkpoint=checkpoint,
+                max_steps_override=2,
+            )
+            resumed_checkpoint = load_training_checkpoint(
+                resumed.final_checkpoint
+            )
+            self.assertEqual(resumed_checkpoint.step, 2)
+            self.assertIn("value_head", resumed_checkpoint.payload)
 
     def test_standalone_evaluation_is_declared_and_nonmutating(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
