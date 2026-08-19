@@ -80,6 +80,58 @@ class ValidationPlotTests(unittest.TestCase):
             self.assertIn('class="line series-valid"', svg)
             self.assertIn('class="line series-shortest"', svg)
 
+    def test_follows_parent_checkpoint_lineage_and_keeps_parent_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "experiment_parent"
+            child = root / "experiment_child"
+            (parent / "checkpoints").mkdir(parents=True)
+            child.mkdir()
+            checkpoint = parent / "checkpoints" / "interruption.pt"
+            checkpoint.write_bytes(b"checkpoint")
+            (parent / "metrics.jsonl").write_text(
+                json.dumps(
+                    {
+                        "kind": "evaluation",
+                        "step": 100,
+                        "frontier": 0,
+                        "metrics": {
+                            "example_count": 256,
+                            "format_success_rate": 0.1,
+                            "valid_path_success_rate": 0.05,
+                            "shortest_path_success_rate": 0.025,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (child / "metrics.jsonl").write_text(
+                json.dumps(
+                    {
+                        "kind": "evaluation",
+                        "step": 200,
+                        "frontier": 0,
+                        "metrics": {
+                            "example_count": 256,
+                            "format_success_rate": 0.2,
+                            "valid_path_success_rate": 0.1,
+                            "shortest_path_success_rate": 0.05,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (child / "provenance.json").write_text(
+                json.dumps({"parent_checkpoint": str(checkpoint)}),
+                encoding="utf-8",
+            )
+
+            lineage = plot.run_lineage(child)
+            points = plot.load_lineage_validation_points(lineage)
+
+            self.assertEqual(lineage, (parent.resolve(), child.resolve()))
+            self.assertEqual([point.step for point in points], [100, 200])
+
 
 if __name__ == "__main__":
     unittest.main()

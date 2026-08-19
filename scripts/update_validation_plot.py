@@ -94,6 +94,42 @@ def select_latest_run(runs_root: Path, experiment_name: str) -> Path:
     return max(candidates, key=lambda path: path.stat().st_mtime_ns)
 
 
+def run_lineage(run_directory: Path) -> tuple[Path, ...]:
+    """Return available parent runs followed by the selected derived run."""
+
+    newest_to_oldest: list[Path] = []
+    seen: set[Path] = set()
+    current = run_directory.resolve()
+    while current not in seen:
+        seen.add(current)
+        newest_to_oldest.append(current)
+        provenance_path = current / "provenance.json"
+        if not provenance_path.is_file():
+            break
+        try:
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            break
+        parent_checkpoint = provenance.get("parent_checkpoint")
+        if not isinstance(parent_checkpoint, str):
+            break
+        parent = Path(parent_checkpoint).resolve().parent.parent
+        if not (parent / "metrics.jsonl").is_file():
+            break
+        current = parent
+    return tuple(reversed(newest_to_oldest))
+
+
+def load_lineage_validation_points(
+    run_directories: Iterable[Path],
+) -> tuple[ValidationPoint, ...]:
+    by_step: dict[int, ValidationPoint] = {}
+    for run_directory in run_directories:
+        for point in load_validation_points(run_directory / "metrics.jsonl"):
+            by_step[point.step] = point
+    return tuple(by_step[step] for step in sorted(by_step))
+
+
 def _polyline(
     points: Iterable[ValidationPoint],
     attribute: str,
@@ -115,7 +151,7 @@ def render_svg(
     updated_at: datetime,
 ) -> str:
     width, height = 1200, 700
-    left, right, top, bottom = 100, 48, 100, 90
+    left, right, top, bottom = 100, 48, 130, 90
     plot_width = width - left - right
     plot_height = height - top - bottom
     maximum_step = max((point.step for point in points), default=100)
@@ -189,13 +225,13 @@ def render_svg(
             "Validation success</text>",
         )
     )
-    legend_x = (500, 655, 840)
+    legend_x = (100, 255, 440)
     for x, (label, _, css_class, _) in zip(legend_x, series, strict=True):
         parts.extend(
             (
-                f'<line class="line {css_class}" x1="{x}" y1="58" '
-                f'x2="{x + 28}" y2="58"/>',
-                f'<text class="legend" x="{x + 38}" y="63">{label}</text>',
+                f'<line class="line {css_class}" x1="{x}" y1="100" '
+                f'x2="{x + 28}" y2="100"/>',
+                f'<text class="legend" x="{x + 38}" y="105">{label}</text>',
             )
         )
     if not points:
@@ -269,7 +305,8 @@ def main() -> int:
     run_directory = select_latest_run(
         arguments.runs_root, arguments.experiment_name
     )
-    points = load_validation_points(run_directory / "metrics.jsonl")
+    lineage = run_lineage(run_directory)
+    points = load_lineage_validation_points(lineage)
     svg = render_svg(
         points,
         run_name=run_directory.name,
@@ -280,6 +317,7 @@ def main() -> int:
         json.dumps(
             {
                 "evaluation_count": len(points),
+                "lineage_run_count": len(lineage),
                 "output": str(arguments.output),
                 "run_directory": str(run_directory),
             },
