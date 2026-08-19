@@ -19,7 +19,7 @@ norm_eps = 1e-5
 [rollout]
 group_size = 16
 max_new_tokens = 256
-generation_batch_size = 384
+generation_batch_size = 512
 temperature = 1.0
 top_p = 1.0
 
@@ -34,7 +34,7 @@ weight_decay = 0.01
 beta1 = 0.9
 beta2 = 0.95
 update_epochs = 2
-microbatch_size = 128
+microbatch_size = 256
 clip_epsilon = 0.2
 kl_coefficient = 0.001
 valid_coefficient = 1.0

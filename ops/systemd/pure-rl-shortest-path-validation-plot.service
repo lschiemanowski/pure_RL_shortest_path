@@ -1,0 +1,7 @@
+[Unit]
+Description=Update pure-RL shortest-path validation plot
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/lothar/workspace/pure_RL_shortest_path
+ExecStart=/home/lothar/.pyenv/versions/fresh/bin/python scripts/update_validation_plot.py --runs-root runs --experiment-name deep12-grpo-full-vocabulary --output runs/deep12-grpo-full-vocabulary-validation.svg
