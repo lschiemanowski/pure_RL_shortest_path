@@ -4,17 +4,28 @@
 from __future__ import annotations
 
 import argparse
-from io import BytesIO
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from html import escape
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 import tempfile
-from collections.abc import Callable, Iterable
 
-from PIL import Image, ImageDraw, ImageFont
+
+os.environ.setdefault(
+    "MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "pure-rl-matplotlib")
+)
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter
+
+plt.rcParams["svg.fonttype"] = "none"
 
 
 @dataclass(frozen=True)
@@ -25,6 +36,14 @@ class ValidationPoint:
     format_rate: float
     valid_rate: float
     shortest_rate: float
+    stage_label: str = ""
+
+
+@dataclass(frozen=True)
+class CurriculumTransition:
+    step: int
+    completed_frontier: int
+    new_frontier: int
 
 
 def _rate(metrics: dict[str, object], rate_key: str, count_key: str) -> float:
@@ -40,17 +59,37 @@ def _rate(metrics: dict[str, object], rate_key: str, count_key: str) -> float:
     return float(count) / denominator
 
 
-def load_validation_points(metrics_path: Path) -> tuple[ValidationPoint, ...]:
-    """Read complete evaluation records while tolerating a partial appended line."""
+def _stage_label(record: dict[str, object]) -> str:
+    config = record.get("problem_config")
+    if not isinstance(config, dict):
+        return ""
+    vertices = config.get("vertices")
+    edges = config.get("edges")
+    minimum = config.get("min_distance")
+    maximum = config.get("max_distance")
+    if not all(isinstance(value, int) for value in (vertices, edges, minimum, maximum)):
+        return ""
+    distance = str(minimum) if minimum == maximum else f"{minimum}–{maximum}"
+    return f"n{vertices}, e{edges}, d{distance}"
 
-    points: list[ValidationPoint] = []
+
+def _json_records(metrics_path: Path) -> Iterable[dict[str, object]]:
     if not metrics_path.is_file():
-        return ()
+        return
     for line in metrics_path.read_text(encoding="utf-8").splitlines():
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(record, dict):
+            yield record
+
+
+def load_validation_points(metrics_path: Path) -> tuple[ValidationPoint, ...]:
+    """Read complete evaluation records while tolerating a partial appended line."""
+
+    points: list[ValidationPoint] = []
+    for record in _json_records(metrics_path):
         if record.get("kind") != "evaluation":
             continue
         metrics = record.get("metrics")
@@ -79,9 +118,28 @@ def load_validation_points(metrics_path: Path) -> tuple[ValidationPoint, ...]:
                     "shortest_path_success_rate",
                     "shortest_path_successes",
                 ),
+                stage_label=_stage_label(record),
             )
         )
     return tuple(sorted(points, key=lambda point: point.step))
+
+
+def load_curriculum_transitions(
+    metrics_path: Path,
+) -> tuple[CurriculumTransition, ...]:
+    transitions: list[CurriculumTransition] = []
+    for record in _json_records(metrics_path):
+        transition = record.get("transition")
+        if record.get("kind") != "curriculum_validation" or not isinstance(
+            transition, dict
+        ):
+            continue
+        step = transition.get("training_step")
+        completed = transition.get("completed_frontier")
+        new = transition.get("new_frontier")
+        if all(isinstance(value, int) for value in (step, completed, new)):
+            transitions.append(CurriculumTransition(step, completed, new))
+    return tuple(sorted(transitions, key=lambda item: item.step))
 
 
 def select_latest_run(runs_root: Path, experiment_name: str) -> Path:
@@ -133,159 +191,182 @@ def load_lineage_validation_points(
     return tuple(by_step[step] for step in sorted(by_step))
 
 
-def _polyline(
-    points: Iterable[ValidationPoint],
-    attribute: str,
-    *,
-    x_position: Callable[[int], float],
-    y_position: Callable[[float], float],
-) -> str:
-    coordinates = " ".join(
-        f"{x_position(point.step):.1f},{y_position(getattr(point, attribute)):.1f}"
-        for point in points
-    )
-    return coordinates
+def load_lineage_transitions(
+    run_directories: Iterable[Path],
+) -> tuple[CurriculumTransition, ...]:
+    by_step: dict[int, CurriculumTransition] = {}
+    for run_directory in run_directories:
+        for transition in load_curriculum_transitions(
+            run_directory / "metrics.jsonl"
+        ):
+            by_step[transition.step] = transition
+    return tuple(by_step[step] for step in sorted(by_step))
 
 
-def render_svg(
+def _figure(
     points: tuple[ValidationPoint, ...],
+    transitions: tuple[CurriculumTransition, ...],
     *,
     run_name: str,
     updated_at: datetime,
-) -> str:
-    width, height = 1200, 700
-    left, right, top, bottom = 100, 48, 130, 90
-    plot_width = width - left - right
-    plot_height = height - top - bottom
-    maximum_step = max((point.step for point in points), default=100)
-    maximum_step = max(100, maximum_step)
-
-    def x_position(step: int) -> float:
-        return left + plot_width * step / maximum_step
-
-    def y_position(rate: float) -> float:
-        return top + plot_height * (1.0 - max(0.0, min(1.0, rate)))
-
-    y_ticks = range(0, 101, 20)
-    x_ticks = sorted({round(maximum_step * index / 5) for index in range(6)})
-    series = (
-        ("Format", "format_rate", "series-format", "circle"),
-        ("Valid path", "valid_rate", "series-valid", "square"),
-        ("Shortest path", "shortest_rate", "series-shortest", "diamond"),
+) -> plt.Figure:
+    fig, axis = plt.subplots(figsize=(14, 7.5))
+    fig.subplots_adjust(left=0.08, right=0.80, top=0.84, bottom=0.11)
+    stages = sorted(
+        {point.frontier for point in points if point.frontier is not None}
     )
-    parts = [
-        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" '
-        'viewBox="0 0 1200 700" role="img" '
-        'aria-labelledby="plot-title plot-description">',
-        "<style>",
-        ":root{color-scheme:light dark;--bg:#ffffff;--fg:#18212b;"
-        "--muted:#667085;--grid:#d0d5dd;--frame:#98a2b3;"
-        "--format:#2563eb;--valid:#d97706;--shortest:#15803d}",
-        "@media(prefers-color-scheme:dark){:root{--bg:#111827;--fg:#f3f4f6;"
-        "--muted:#cbd5e1;--grid:#374151;--frame:#6b7280;"
-        "--format:#60a5fa;--valid:#fbbf24;--shortest:#4ade80}}",
-        "text{font-family:ui-sans-serif,system-ui,sans-serif;fill:var(--fg)}",
-        ".title{font-size:28px;font-weight:600}.subtitle{font-size:15px;fill:var(--muted)}",
-        ".axis{font-size:14px;fill:var(--muted)}.legend{font-size:15px}",
-        ".grid{stroke:var(--grid);stroke-width:1}.frame{fill:none;stroke:var(--frame)}",
-        ".line{fill:none;stroke-width:3}.series-format{stroke:var(--format);fill:var(--format)}",
-        ".series-valid{stroke:var(--valid);fill:var(--valid)}",
-        ".series-shortest{stroke:var(--shortest);fill:var(--shortest)}",
-        ".point{stroke:var(--bg);stroke-width:2}.empty{font-size:18px;fill:var(--muted)}",
-        "</style>",
-        '<rect width="1200" height="700" fill="var(--bg)"/>',
-        '<title id="plot-title">Scheduled validation success rates</title>',
-        '<desc id="plot-description">Format, valid-path, and shortest-path '
-        "success percentages by training step.</desc>",
-        '<text class="title" x="100" y="42">Scheduled validation success rates</text>',
-        f'<text class="subtitle" x="100" y="70">{escape(run_name)} · updated '
-        f'{escape(updated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))}</text>',
+    color_map = plt.get_cmap("tab10")
+    colors = {stage: color_map(stage % 10) for stage in stages}
+    metrics = (
+        ("Shortest path", "shortest_rate", "-", "o", 2.8),
+        ("Valid path", "valid_rate", "--", "x", 2.1),
+        ("Format", "format_rate", ":", "^", 1.9),
+    )
+
+    for stage in stages:
+        stage_points = [point for point in points if point.frontier == stage]
+        steps = [point.step for point in stage_points]
+        color = colors[stage]
+        for _, attribute, line_style, marker, width in metrics:
+            values = [100.0 * getattr(point, attribute) for point in stage_points]
+            axis.plot(
+                steps,
+                values,
+                color=color,
+                linewidth=width,
+                linestyle=line_style,
+                solid_capstyle="round",
+            )
+            axis.scatter(
+                steps,
+                values,
+                s=30 if marker != "x" else 35,
+                marker=marker,
+                color=color,
+                alpha=0.30,
+                linewidths=0.9 if marker == "x" else 0,
+                zorder=3,
+            )
+
+    for transition in transitions:
+        color = colors.get(transition.new_frontier, "#555555")
+        axis.axvline(
+            transition.step,
+            color=color,
+            linewidth=1.2,
+            alpha=0.38,
+        )
+        axis.annotate(
+            f"Stage {transition.completed_frontier} → {transition.new_frontier}",
+            xy=(transition.step, 100),
+            xytext=(8, -8),
+            textcoords="offset points",
+            ha="left",
+            va="top",
+            fontsize=9,
+            color=color,
+        )
+
+    stage_handles: list[Line2D] = []
+    for stage in stages:
+        label = next(
+            (point.stage_label for point in points if point.frontier == stage), ""
+        )
+        suffix = f": {label}" if label else ""
+        stage_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=colors[stage],
+                linewidth=3,
+                label=f"Stage {stage}{suffix}",
+            )
+        )
+    metric_handles = [
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            linewidth=width,
+            linestyle=line_style,
+            marker=marker,
+            markersize=4,
+            label=label,
+        )
+        for label, _, line_style, marker, width in metrics
     ]
-    for value in y_ticks:
-        y = y_position(value / 100)
-        parts.extend(
-            (
-                f'<line class="grid" x1="{left}" y1="{y:.1f}" '
-                f'x2="{width - right}" y2="{y:.1f}"/>',
-                f'<text class="axis" x="{left - 14}" y="{y + 5:.1f}" '
-                f'text-anchor="end">{value}%</text>',
-            )
+    if stage_handles:
+        stage_legend = axis.legend(
+            handles=stage_handles,
+            title="Curriculum stage",
+            loc="upper left",
+            framealpha=0.94,
+            fontsize=9,
         )
-    for value in x_ticks:
-        x = x_position(value)
-        parts.append(
-            f'<text class="axis" x="{x:.1f}" y="{height - bottom + 30}" '
-            f'text-anchor="middle">{value}</text>'
-        )
-    parts.extend(
-        (
-            f'<rect class="frame" x="{left}" y="{top}" width="{plot_width}" '
-            f'height="{plot_height}"/>',
-            f'<text class="axis" x="{left + plot_width / 2:.1f}" y="{height - 25}" '
-            'text-anchor="middle">Training step</text>',
-            f'<text class="axis" x="24" y="{top + plot_height / 2:.1f}" '
-            f'text-anchor="middle" transform="rotate(-90 24 {top + plot_height / 2:.1f})">'
-            "Validation success</text>",
-        )
+        axis.add_artist(stage_legend)
+    axis.legend(
+        handles=metric_handles,
+        title="Validation metric",
+        loc="center left",
+        bbox_to_anchor=(1.01, 0.5),
+        framealpha=0.94,
+        fontsize=9,
     )
-    legend_x = (100, 255, 440)
-    for x, (label, _, css_class, _) in zip(legend_x, series, strict=True):
-        parts.extend(
-            (
-                f'<line class="line {css_class}" x1="{x}" y1="100" '
-                f'x2="{x + 28}" y2="100"/>',
-                f'<text class="legend" x="{x + 38}" y="105">{label}</text>',
-            )
-        )
+
+    axis.set_title("Deep GRPO validation performance", fontsize=15, pad=30)
+    axis.text(
+        0.5,
+        1.008,
+        (
+            "Exact 256-example validations every 100 steps; "
+            "metric lines are segmented at curriculum transitions"
+        ),
+        transform=axis.transAxes,
+        ha="center",
+        va="bottom",
+        fontsize=9.5,
+        color="#555555",
+    )
+    axis.set_xlabel("Global training step")
+    axis.set_ylabel("Validation performance (%)")
+    axis.set_ylim(-2, 102)
+    axis.set_yticks(range(0, 101, 10))
+    axis.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value):,}"))
+    axis.grid(axis="y", color="#c7c7c7", alpha=0.5, linewidth=0.7)
+    axis.grid(axis="x", color="#dddddd", alpha=0.25, linewidth=0.5)
+    axis.spines[["top", "right"]].set_visible(False)
     if not points:
-        parts.append(
-            f'<text class="empty" x="{left + plot_width / 2:.1f}" '
-            f'y="{top + plot_height / 2:.1f}" text-anchor="middle">'
-            "Waiting for the first scheduled validation record</text>"
+        axis.text(
+            0.5,
+            0.5,
+            "Waiting for the first scheduled validation record",
+            transform=axis.transAxes,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#666666",
         )
-    for _, attribute, css_class, marker in series:
-        coordinates = _polyline(
-            points,
-            attribute,
-            x_position=x_position,
-            y_position=y_position,
-        )
-        if len(points) > 1:
-            parts.append(
-                f'<polyline class="line {css_class}" points="{coordinates}"/>'
-            )
-        for point in points:
-            x = x_position(point.step)
-            y = y_position(getattr(point, attribute))
-            if marker == "circle":
-                shape = f'<circle cx="{x:.1f}" cy="{y:.1f}" r="6"/>'
-            elif marker == "square":
-                shape = f'<rect x="{x - 6:.1f}" y="{y - 6:.1f}" width="12" height="12"/>'
-            else:
-                shape = (
-                    f'<path d="M {x:.1f} {y - 7:.1f} L {x + 7:.1f} {y:.1f} '
-                    f'L {x:.1f} {y + 7:.1f} L {x - 7:.1f} {y:.1f} Z"/>'
-                )
-            parts.append(f'<g class="point {css_class}">{shape}</g>')
-    if points:
-        last = points[-1]
-        parts.append(
-            f'<text class="subtitle" x="{width - right}" y="{height - 25}" '
-            f'text-anchor="end">latest: step {last.step}, frontier '
-            f'{last.frontier if last.frontier is not None else "unknown"}, '
-            f'n={last.example_count}</text>'
-        )
-    parts.append("</svg>\n")
-    return "".join(parts)
+    return fig
 
 
-def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    path = Path("/usr/share/fonts/truetype/dejavu") / name
-    try:
-        return ImageFont.truetype(str(path), size=size)
-    except OSError:
-        return ImageFont.load_default()
+def _render(
+    points: tuple[ValidationPoint, ...],
+    transitions: tuple[CurriculumTransition, ...],
+    *,
+    run_name: str,
+    updated_at: datetime,
+    output_format: str,
+) -> bytes:
+    figure = _figure(
+        points,
+        transitions,
+        run_name=run_name,
+        updated_at=updated_at,
+    )
+    output = BytesIO()
+    figure.savefig(output, format=output_format, dpi=180, facecolor="white")
+    plt.close(figure)
+    return output.getvalue()
 
 
 def render_png(
@@ -293,164 +374,31 @@ def render_png(
     *,
     run_name: str,
     updated_at: datetime,
+    transitions: tuple[CurriculumTransition, ...] = (),
 ) -> bytes:
-    """Render the same validation history as a viewer-compatible PNG."""
-
-    width, height = 1200, 700
-    left, right, top, bottom = 100, 48, 130, 90
-    plot_width = width - left - right
-    plot_height = height - top - bottom
-    maximum_step = max(100, max((point.step for point in points), default=100))
-    colors = {
-        "background": "#ffffff",
-        "foreground": "#18212b",
-        "muted": "#667085",
-        "grid": "#d0d5dd",
-        "frame": "#98a2b3",
-        "format": "#2563eb",
-        "valid": "#d97706",
-        "shortest": "#15803d",
-    }
-    image = Image.new("RGB", (width, height), colors["background"])
-    draw = ImageDraw.Draw(image)
-    title_font = _font(28, bold=True)
-    body_font = _font(15)
-    axis_font = _font(14)
-    empty_font = _font(18)
-
-    def x_position(step: int) -> float:
-        return left + plot_width * step / maximum_step
-
-    def y_position(rate: float) -> float:
-        return top + plot_height * (1.0 - max(0.0, min(1.0, rate)))
-
-    draw.text(
-        (left, 18),
-        "Scheduled validation success rates",
-        fill=colors["foreground"],
-        font=title_font,
-    )
-    subtitle = (
-        f"{run_name} · updated "
-        f"{updated_at.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
-    )
-    draw.text((left, 57), subtitle, fill=colors["muted"], font=body_font)
-
-    for value in range(0, 101, 20):
-        y = y_position(value / 100)
-        draw.line((left, y, width - right, y), fill=colors["grid"], width=1)
-        draw.text(
-            (left - 14, y),
-            f"{value}%",
-            fill=colors["muted"],
-            font=axis_font,
-            anchor="rm",
-        )
-    x_ticks = sorted({round(maximum_step * index / 5) for index in range(6)})
-    for value in x_ticks:
-        draw.text(
-            (x_position(value), height - bottom + 30),
-            str(value),
-            fill=colors["muted"],
-            font=axis_font,
-            anchor="mm",
-        )
-    draw.rectangle(
-        (left, top, width - right, height - bottom),
-        outline=colors["frame"],
-        width=1,
-    )
-    draw.text(
-        (left + plot_width / 2, height - 25),
-        "Training step",
-        fill=colors["muted"],
-        font=axis_font,
-        anchor="mm",
-    )
-    vertical_label = Image.new("RGBA", (220, 30), (0, 0, 0, 0))
-    vertical_draw = ImageDraw.Draw(vertical_label)
-    vertical_draw.text(
-        (110, 15),
-        "Validation success",
-        fill=colors["muted"],
-        font=axis_font,
-        anchor="mm",
-    )
-    vertical_label = vertical_label.rotate(90, expand=True)
-    image.paste(
-        vertical_label,
-        (10, round(top + plot_height / 2 - vertical_label.height / 2)),
-        vertical_label,
+    return _render(
+        points,
+        transitions,
+        run_name=run_name,
+        updated_at=updated_at,
+        output_format="png",
     )
 
-    series = (
-        ("Format", "format_rate", colors["format"], "circle"),
-        ("Valid path", "valid_rate", colors["valid"], "square"),
-        ("Shortest path", "shortest_rate", colors["shortest"], "diamond"),
+
+def render_svg(
+    points: tuple[ValidationPoint, ...],
+    *,
+    run_name: str,
+    updated_at: datetime,
+    transitions: tuple[CurriculumTransition, ...] = (),
+) -> bytes:
+    return _render(
+        points,
+        transitions,
+        run_name=run_name,
+        updated_at=updated_at,
+        output_format="svg",
     )
-    for x, (label, _, color, _) in zip((100, 255, 440), series, strict=True):
-        draw.line((x, 100, x + 28, 100), fill=color, width=3)
-        draw.text((x + 38, 100), label, fill=colors["foreground"], font=body_font, anchor="lm")
-
-    if not points:
-        draw.text(
-            (left + plot_width / 2, top + plot_height / 2),
-            "Waiting for the first scheduled validation record",
-            fill=colors["muted"],
-            font=empty_font,
-            anchor="mm",
-        )
-    for _, attribute, color, marker in series:
-        coordinates = [
-            (x_position(point.step), y_position(getattr(point, attribute)))
-            for point in points
-        ]
-        if len(coordinates) > 1:
-            draw.line(coordinates, fill=color, width=3, joint="curve")
-        for x, y in coordinates:
-            if marker == "circle":
-                draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=color, outline=colors["background"], width=2)
-            elif marker == "square":
-                draw.rectangle((x - 6, y - 6, x + 6, y + 6), fill=color, outline=colors["background"], width=2)
-            else:
-                draw.polygon(
-                    ((x, y - 7), (x + 7, y), (x, y + 7), (x - 7, y)),
-                    fill=color,
-                    outline=colors["background"],
-                )
-    if points:
-        last = points[-1]
-        latest = (
-            f"latest: step {last.step}, frontier "
-            f"{last.frontier if last.frontier is not None else 'unknown'}, "
-            f"n={last.example_count}"
-        )
-        draw.text(
-            (width - right, height - 25),
-            latest,
-            fill=colors["muted"],
-            font=axis_font,
-            anchor="rm",
-        )
-    output = BytesIO()
-    image.save(output, format="PNG", optimize=True)
-    return output.getvalue()
-
-
-def write_atomically(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", dir=path.parent
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, path)
-    except BaseException:
-        Path(temporary_name).unlink(missing_ok=True)
-        raise
 
 
 def write_bytes_atomically(path: Path, content: bytes) -> None:
@@ -485,19 +433,27 @@ def main() -> int:
     )
     lineage = run_lineage(run_directory)
     points = load_lineage_validation_points(lineage)
-    svg = render_svg(
-        points,
-        run_name=run_directory.name,
-        updated_at=datetime.now(timezone.utc),
-    )
-    write_atomically(arguments.output, svg)
-    if arguments.png_output is not None:
-        png = render_png(
+    transitions = load_lineage_transitions(lineage)
+    updated_at = datetime.now(timezone.utc)
+    write_bytes_atomically(
+        arguments.output,
+        render_svg(
             points,
+            transitions=transitions,
             run_name=run_directory.name,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=updated_at,
+        ),
+    )
+    if arguments.png_output is not None:
+        write_bytes_atomically(
+            arguments.png_output,
+            render_png(
+                points,
+                transitions=transitions,
+                run_name=run_directory.name,
+                updated_at=updated_at,
+            ),
         )
-        write_bytes_atomically(arguments.png_output, png)
     print(
         json.dumps(
             {
@@ -510,6 +466,7 @@ def main() -> int:
                     else None
                 ),
                 "run_directory": str(run_directory),
+                "transition_count": len(transitions),
             },
             sort_keys=True,
         )

@@ -76,12 +76,11 @@ class ValidationPlotTests(unittest.TestCase):
             )
 
             self.assertEqual(selected, second)
-            self.assertIn("Format", svg)
-            self.assertIn("Valid path", svg)
-            self.assertIn("Shortest path", svg)
-            self.assertIn('class="line series-format"', svg)
-            self.assertIn('class="line series-valid"', svg)
-            self.assertIn('class="line series-shortest"', svg)
+            svg_text = svg.decode("utf-8")
+            self.assertIn("Deep GRPO validation performance", svg_text)
+            self.assertIn("Format", svg_text)
+            self.assertIn("Valid path", svg_text)
+            self.assertIn("Shortest path", svg_text)
 
             png = plot.render_png(
                 (
@@ -93,7 +92,48 @@ class ValidationPlotTests(unittest.TestCase):
             )
             with Image.open(BytesIO(png)) as image:
                 self.assertEqual(image.format, "PNG")
-                self.assertEqual(image.size, (1200, 700))
+                self.assertEqual(image.size, (2520, 1350))
+
+    def test_loads_transition_and_segments_metric_lines_by_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            metrics = Path(temporary) / "metrics.jsonl"
+            metrics.write_text(
+                json.dumps(
+                    {
+                        "kind": "curriculum_validation",
+                        "step": 200,
+                        "transition": {
+                            "training_step": 200,
+                            "completed_frontier": 0,
+                            "new_frontier": 1,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            transitions = plot.load_curriculum_transitions(metrics)
+            self.assertEqual(
+                transitions, (plot.CurriculumTransition(200, 0, 1),)
+            )
+
+            points = (
+                plot.ValidationPoint(100, 0, 256, 0.5, 0.25, 0.125),
+                plot.ValidationPoint(200, 0, 256, 0.8, 0.75, 0.7),
+                plot.ValidationPoint(300, 1, 256, 0.4, 0.1, 0.05),
+                plot.ValidationPoint(400, 1, 256, 0.6, 0.3, 0.2),
+            )
+            figure = plot._figure(
+                points,
+                transitions,
+                run_name="test-run",
+                updated_at=datetime(2026, 8, 19, tzinfo=timezone.utc),
+            )
+            line_steps = [tuple(line.get_xdata()) for line in figure.axes[0].lines]
+            plot.plt.close(figure)
+
+            self.assertIn((100, 200), line_steps)
+            self.assertIn((300, 400), line_steps)
+            self.assertNotIn((200, 300), line_steps)
 
     def test_follows_parent_checkpoint_lineage_and_keeps_parent_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
