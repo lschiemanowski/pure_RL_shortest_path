@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
 import importlib.util
 import json
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+
+from PIL import Image
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "update_validation_plot.py"
@@ -79,6 +82,18 @@ class ValidationPlotTests(unittest.TestCase):
             self.assertIn('class="line series-format"', svg)
             self.assertIn('class="line series-valid"', svg)
             self.assertIn('class="line series-shortest"', svg)
+
+            png = plot.render_png(
+                (
+                    plot.ValidationPoint(100, 0, 256, 0.5, 0.25, 0.125),
+                    plot.ValidationPoint(200, 0, 256, 0.75, 0.5, 0.25),
+                ),
+                run_name=selected.name,
+                updated_at=datetime(2026, 8, 19, tzinfo=timezone.utc),
+            )
+            with Image.open(BytesIO(png)) as image:
+                self.assertEqual(image.format, "PNG")
+                self.assertEqual(image.size, (1200, 700))
 
     def test_follows_parent_checkpoint_lineage_and_keeps_parent_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

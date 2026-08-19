@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from io import BytesIO
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
@@ -12,6 +13,8 @@ import os
 from pathlib import Path
 import tempfile
 from collections.abc import Callable, Iterable
+
+from PIL import Image, ImageDraw, ImageFont
 
 
 @dataclass(frozen=True)
@@ -276,6 +279,164 @@ def render_svg(
     return "".join(parts)
 
 
+def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    path = Path("/usr/share/fonts/truetype/dejavu") / name
+    try:
+        return ImageFont.truetype(str(path), size=size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def render_png(
+    points: tuple[ValidationPoint, ...],
+    *,
+    run_name: str,
+    updated_at: datetime,
+) -> bytes:
+    """Render the same validation history as a viewer-compatible PNG."""
+
+    width, height = 1200, 700
+    left, right, top, bottom = 100, 48, 130, 90
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    maximum_step = max(100, max((point.step for point in points), default=100))
+    colors = {
+        "background": "#ffffff",
+        "foreground": "#18212b",
+        "muted": "#667085",
+        "grid": "#d0d5dd",
+        "frame": "#98a2b3",
+        "format": "#2563eb",
+        "valid": "#d97706",
+        "shortest": "#15803d",
+    }
+    image = Image.new("RGB", (width, height), colors["background"])
+    draw = ImageDraw.Draw(image)
+    title_font = _font(28, bold=True)
+    body_font = _font(15)
+    axis_font = _font(14)
+    empty_font = _font(18)
+
+    def x_position(step: int) -> float:
+        return left + plot_width * step / maximum_step
+
+    def y_position(rate: float) -> float:
+        return top + plot_height * (1.0 - max(0.0, min(1.0, rate)))
+
+    draw.text(
+        (left, 18),
+        "Scheduled validation success rates",
+        fill=colors["foreground"],
+        font=title_font,
+    )
+    subtitle = (
+        f"{run_name} · updated "
+        f"{updated_at.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+    draw.text((left, 57), subtitle, fill=colors["muted"], font=body_font)
+
+    for value in range(0, 101, 20):
+        y = y_position(value / 100)
+        draw.line((left, y, width - right, y), fill=colors["grid"], width=1)
+        draw.text(
+            (left - 14, y),
+            f"{value}%",
+            fill=colors["muted"],
+            font=axis_font,
+            anchor="rm",
+        )
+    x_ticks = sorted({round(maximum_step * index / 5) for index in range(6)})
+    for value in x_ticks:
+        draw.text(
+            (x_position(value), height - bottom + 30),
+            str(value),
+            fill=colors["muted"],
+            font=axis_font,
+            anchor="mm",
+        )
+    draw.rectangle(
+        (left, top, width - right, height - bottom),
+        outline=colors["frame"],
+        width=1,
+    )
+    draw.text(
+        (left + plot_width / 2, height - 25),
+        "Training step",
+        fill=colors["muted"],
+        font=axis_font,
+        anchor="mm",
+    )
+    vertical_label = Image.new("RGBA", (220, 30), (0, 0, 0, 0))
+    vertical_draw = ImageDraw.Draw(vertical_label)
+    vertical_draw.text(
+        (110, 15),
+        "Validation success",
+        fill=colors["muted"],
+        font=axis_font,
+        anchor="mm",
+    )
+    vertical_label = vertical_label.rotate(90, expand=True)
+    image.paste(
+        vertical_label,
+        (10, round(top + plot_height / 2 - vertical_label.height / 2)),
+        vertical_label,
+    )
+
+    series = (
+        ("Format", "format_rate", colors["format"], "circle"),
+        ("Valid path", "valid_rate", colors["valid"], "square"),
+        ("Shortest path", "shortest_rate", colors["shortest"], "diamond"),
+    )
+    for x, (label, _, color, _) in zip((100, 255, 440), series, strict=True):
+        draw.line((x, 100, x + 28, 100), fill=color, width=3)
+        draw.text((x + 38, 100), label, fill=colors["foreground"], font=body_font, anchor="lm")
+
+    if not points:
+        draw.text(
+            (left + plot_width / 2, top + plot_height / 2),
+            "Waiting for the first scheduled validation record",
+            fill=colors["muted"],
+            font=empty_font,
+            anchor="mm",
+        )
+    for _, attribute, color, marker in series:
+        coordinates = [
+            (x_position(point.step), y_position(getattr(point, attribute)))
+            for point in points
+        ]
+        if len(coordinates) > 1:
+            draw.line(coordinates, fill=color, width=3, joint="curve")
+        for x, y in coordinates:
+            if marker == "circle":
+                draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=color, outline=colors["background"], width=2)
+            elif marker == "square":
+                draw.rectangle((x - 6, y - 6, x + 6, y + 6), fill=color, outline=colors["background"], width=2)
+            else:
+                draw.polygon(
+                    ((x, y - 7), (x + 7, y), (x, y + 7), (x - 7, y)),
+                    fill=color,
+                    outline=colors["background"],
+                )
+    if points:
+        last = points[-1]
+        latest = (
+            f"latest: step {last.step}, frontier "
+            f"{last.frontier if last.frontier is not None else 'unknown'}, "
+            f"n={last.example_count}"
+        )
+        draw.text(
+            (width - right, height - 25),
+            latest,
+            fill=colors["muted"],
+            font=axis_font,
+            anchor="rm",
+        )
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 def write_atomically(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -292,11 +453,28 @@ def write_atomically(path: Path, content: str) -> None:
         raise
 
 
+def write_bytes_atomically(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    except BaseException:
+        Path(temporary_name).unlink(missing_ok=True)
+        raise
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs-root", type=Path, default=Path("runs"))
     parser.add_argument("--experiment-name", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--png-output", type=Path)
     return parser.parse_args()
 
 
@@ -313,12 +491,24 @@ def main() -> int:
         updated_at=datetime.now(timezone.utc),
     )
     write_atomically(arguments.output, svg)
+    if arguments.png_output is not None:
+        png = render_png(
+            points,
+            run_name=run_directory.name,
+            updated_at=datetime.now(timezone.utc),
+        )
+        write_bytes_atomically(arguments.png_output, png)
     print(
         json.dumps(
             {
                 "evaluation_count": len(points),
                 "lineage_run_count": len(lineage),
                 "output": str(arguments.output),
+                "png_output": (
+                    str(arguments.png_output)
+                    if arguments.png_output is not None
+                    else None
+                ),
                 "run_directory": str(run_directory),
             },
             sort_keys=True,
