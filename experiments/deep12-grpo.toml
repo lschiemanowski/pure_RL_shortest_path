@@ -54,8 +54,8 @@ batch_size = 128
 mode = "greedy"
 
 [curriculum]
-past_decay_scale = 2.0
-future_decay_scale = 0.25
+past_decay_scale = 1.0
+future_decay_scale = 0.5
 advancement_threshold = 0.8
 advancement_patience = 3
 

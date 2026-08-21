@@ -1,9 +1,9 @@
 [Unit]
-Description=Refresh pure-RL shortest-path validation plot every 30 minutes
+Description=Refresh pure-RL shortest-path validation plot every 5 minutes
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=30min
+OnUnitActiveSec=5min
 AccuracySec=1min
 Persistent=true
 Unit=pure-rl-shortest-path-validation-plot.service
