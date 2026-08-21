@@ -3,8 +3,15 @@ from __future__ import annotations
 import unittest
 
 import torch
+from torch import nn
 
-from pure_rl_shortest_path.model import Transformer, TransformerConfig, count_parameters
+from pure_rl_shortest_path.model import (
+    ModelOutput,
+    Transformer,
+    TransformerConfig,
+    count_parameters,
+    generate_tokens,
+)
 
 
 def small_config(**overrides: object) -> TransformerConfig:
@@ -128,6 +135,82 @@ class PrefixScoringTests(unittest.TestCase):
             self.model(
                 torch.ones((1, 1), dtype=torch.long), past_key_values=(), use_cache=True
             )
+
+
+class StaggeredEosPolicy(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.config = type(
+            "Config", (), {"max_context_length": 32, "vocab_size": 16}
+        )()
+        self.batch_sizes: list[int] = []
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        past_key_values: object | None = None,
+        use_cache: bool = False,
+    ) -> ModelOutput:
+        self.batch_sizes.append(input_ids.shape[0])
+        self.assert_attention_shape(input_ids, attention_mask)
+        if past_key_values is None:
+            row_markers = input_ids[:, -1]
+            prefix_length = input_ids.shape[1]
+        else:
+            keys = past_key_values[0][0]  # type: ignore[index]
+            row_markers = keys[:, 0, 0, 0].to(dtype=torch.long)
+            prefix_length = keys.shape[2] + input_ids.shape[1]
+
+        token_index = prefix_length - 1
+        selected = torch.full_like(row_markers, 5)
+        selected = torch.where(row_markers.eq(10), torch.ones_like(selected), selected)
+        selected = torch.where(
+            row_markers.eq(11) & (token_index >= 8),
+            torch.ones_like(selected),
+            selected,
+        )
+        logits = torch.full(
+            (*input_ids.shape, self.config.vocab_size),
+            -torch.inf,
+            device=input_ids.device,
+        )
+        logits[:, -1].scatter_(1, selected[:, None], 0.0)
+        cache = row_markers.to(dtype=torch.float32).view(-1, 1, 1, 1)
+        cache = cache.expand(-1, 1, prefix_length, 1).clone()
+        return ModelOutput(logits, ((cache, cache.clone()),) if use_cache else None)
+
+    def assert_attention_shape(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None
+    ) -> None:
+        assert attention_mask is not None
+        assert attention_mask.shape[0] == input_ids.shape[0]
+
+
+class GenerationTests(unittest.TestCase):
+    def test_gpu_buffer_preserves_order_across_staggered_eos_and_compaction(
+        self,
+    ) -> None:
+        model = StaggeredEosPolicy()
+        completions = generate_tokens(
+            model,  # type: ignore[arg-type]
+            ((10,), (11,), (12,)),
+            max_new_tokens=10,
+            batch_size=None,
+            pad_token=0,
+            eos_token=1,
+            device=torch.device("cpu"),
+            select_next=lambda logits: logits.argmax(dim=-1),
+        )
+        self.assertEqual(
+            completions,
+            (
+                (1,),
+                (5, 5, 5, 5, 5, 5, 5, 5, 1),
+                (5, 5, 5, 5, 5, 5, 5, 5, 5, 5),
+            ),
+        )
+        self.assertEqual(model.batch_sizes, [3] * 8 + [2] * 2)
 
 
 if __name__ == "__main__":

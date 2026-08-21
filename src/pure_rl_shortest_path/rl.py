@@ -87,10 +87,6 @@ def sample_policy_tokens(
     if logits.ndim != 2 or logits.shape[0] == 0 or logits.shape[1] == 0:
         raise ValueError("logits must have shape [positive_batch, positive_vocabulary]")
     probabilities = logits.float().softmax(dim=-1)
-    if generator is not None and probabilities.device.type != "cpu":
-        return torch.multinomial(
-            probabilities.cpu(), 1, generator=generator
-        ).squeeze(1).to(logits.device)
     return torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
 
 
@@ -104,13 +100,17 @@ def collect_grouped_completions(
     generator: torch.Generator | None = None,
     autocast_dtype: torch.dtype | None = None,
 ) -> list[SampledCompletion]:
-    """Sample adjacent completion groups without task-specific token constraints."""
+    """Samples adjacent completion groups without task-specific token constraints."""
 
     expanded = [
         (group_id, example)
         for group_id, example in enumerate(examples)
         for _ in range(config.group_size)
     ]
+    prng = generator
+    if generator is not None and device.type == "cuda":
+        seed = int(torch.randint(2**63-1, (), generator=generator))
+        prng = torch.Generator(device).manual_seed(seed)
     generated = generate_tokens(
         model,
         [example.prompt for _, example in expanded],
@@ -119,7 +119,7 @@ def collect_grouped_completions(
         pad_token=PAD,
         eos_token=EOS,
         device=device,
-        select_next=lambda logits: sample_policy_tokens(logits, generator),
+        select_next=lambda logits: sample_policy_tokens(logits, prng),
         autocast_dtype=autocast_dtype,
     )
     return [

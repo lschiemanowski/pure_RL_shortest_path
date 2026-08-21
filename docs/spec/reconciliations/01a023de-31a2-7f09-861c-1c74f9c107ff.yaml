@@ -1,0 +1,10 @@
+decisions:
+  - abstraction_changed: false
+    node: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
+    outcome: revised
+    rationale: The accepted rollout contract is unchanged; exact mappings now cover CUDA-local
+      sampling, bulk prompt staging, buffered completions, and cache compaction.
+direction: code-led
+id: 01a023de-31a2-7f09-861c-1c74f9c107ff
+rationale: Reconcile the CUDA-local rollout generation optimization with the unchanged rollout
+  contract.

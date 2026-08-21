@@ -90,6 +90,20 @@ class EosPolicy(nn.Module):
         return ModelOutput(logits, () if use_cache else None)
 
 
+class UniformPolicy(EosPolicy):
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        past_key_values: object | None = None,
+        use_cache: bool = False,
+    ) -> ModelOutput:
+        logits = torch.zeros(
+            (*input_ids.shape, self.config.vocab_size), device=input_ids.device
+        )
+        return ModelOutput(logits, () if use_cache else None)
+
+
 class RolloutSamplingTests(unittest.TestCase):
     def test_training_sampling_requires_the_literal_policy_distribution(self) -> None:
         RolloutSamplingConfig(2, 8, temperature=1.0, top_p=1.0)
@@ -110,6 +124,41 @@ class RolloutSamplingTests(unittest.TestCase):
         self.assertEqual([sample.group_id for sample in samples], [0, 0, 0, 1, 1, 1])
         self.assertTrue(all(sample.completion == (EOS,) for sample in samples))
         self.assertTrue(all(sample.terminated_by_eos for sample in samples))
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    def test_cuda_sampling_uses_a_reproducible_device_local_generator(self) -> None:
+        example, vocabulary = make_example()
+        config = RolloutSamplingConfig(group_size=8, max_new_tokens=12)
+        first = collect_grouped_completions(
+            UniformPolicy(vocabulary.size),
+            [example],
+            config,
+            device=torch.device("cuda"),
+            generator=torch.Generator().manual_seed(17),
+        )
+        second = collect_grouped_completions(
+            UniformPolicy(vocabulary.size),
+            [example],
+            config,
+            device=torch.device("cuda"),
+            generator=torch.Generator().manual_seed(17),
+        )
+        self.assertEqual(
+            [sample.completion for sample in first],
+            [sample.completion for sample in second],
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    def test_cuda_collection_accepts_the_checkpointed_cpu_generator(self) -> None:
+        example, vocabulary = make_example()
+        samples = collect_grouped_completions(
+            EosPolicy(vocabulary.size),
+            [example],
+            RolloutSamplingConfig(group_size=2, max_new_tokens=3),
+            device=torch.device("cuda"),
+            generator=torch.Generator().manual_seed(23),
+        )
+        self.assertEqual([sample.completion for sample in samples], [(EOS,), (EOS,)])
 
 
 class RewardTests(unittest.TestCase):

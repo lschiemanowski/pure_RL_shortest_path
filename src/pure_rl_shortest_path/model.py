@@ -300,50 +300,123 @@ def generate_tokens(
     generated: list[tuple[int, ...]] = []
     try:
         for start in range(0, len(prompts), size):
-            batch = prompts[start : start + size]
-            prompt_length = max(len(prompt) for prompt in batch)
-            input_ids = torch.full(
-                (len(batch), prompt_length), pad_token, dtype=torch.long, device=device
+            generated.extend(
+                _generate_token_batch(
+                    model,
+                    prompts[start : start + size],
+                    max_new_tokens=max_new_tokens,
+                    pad_token=pad_token,
+                    eos_token=eos_token,
+                    device=device,
+                    select_next=select_next,
+                    autocast_dtype=autocast_dtype,
+                )
             )
-            attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
-            for row, prompt in enumerate(batch):
-                length = len(prompt)
-                input_ids[row, -length:] = torch.tensor(prompt, device=device)
-                attention_mask[row, -length:] = True
-
-            completions: list[list[int]] = [[] for _ in batch]
-            done = torch.zeros(len(batch), dtype=torch.bool, device=device)
-            current = input_ids
-            cache = None
-            for _ in range(max_new_tokens):
-                with torch.autocast(
-                    device_type=device.type,
-                    dtype=autocast_dtype,
-                    enabled=autocast_dtype is not None,
-                ):
-                    output = model(
-                        current,
-                        attention_mask=attention_mask,
-                        past_key_values=cache,
-                        use_cache=True,
-                    )
-                selected = select_next(output.logits[:, -1])
-                selected = torch.where(done, torch.full_like(selected, pad_token), selected)
-                active = ~done
-                for row in active.nonzero(as_tuple=False).flatten().tolist():
-                    completions[row].append(int(selected[row].item()))
-                done |= selected.eq(eos_token)
-                if bool(done.all()):
-                    break
-                current = selected[:, None]
-                attention_mask = torch.cat((attention_mask, active[:, None]), dim=1)
-                cache = output.past_key_values
-
-            generated.extend(map(tuple, completions))
     finally:
         model.train(was_training)
     return tuple(generated)
 
 
+def _stage_generation_prompts(
+    prompts: Sequence[Sequence[int]], pad_token: int, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build a whole prompt batch on CPU before transferring it to the device."""
+
+    prompt_length = max(len(prompt) for prompt in prompts)
+    input_ids = torch.full((len(prompts), prompt_length), pad_token, dtype=torch.long)
+    attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+    for row, prompt in enumerate(prompts):
+        length = len(prompt)
+        input_ids[row, -length:] = torch.tensor(prompt)
+        attention_mask[row, -length:] = True
+    return input_ids.to(device), attention_mask.to(device)
+
+
+def _compact_cache(
+    cache: PastKeyValues | None, keep: torch.Tensor
+) -> PastKeyValues | None:
+    """Compact cached layers by batch rows."""
+
+    if cache is None:
+        return None
+    return tuple(
+        (key.index_select(0, keep), value.index_select(0, keep))
+        for key, value in cache
+    )
+
+
+def _trim_completion_buffer(
+    buffer: torch.Tensor, eos_token: int, max_new_tokens: int
+) -> tuple[tuple[int, ...], ...]:
+    completions: list[tuple[int, ...]] = []
+    for completion in buffer.cpu().tolist():
+        try:
+            completion_length = completion.index(eos_token) + 1
+        except ValueError:
+            completion_length = max_new_tokens
+        completions.append(tuple(completion[:completion_length]))
+    return tuple(completions)
+
+
 def count_parameters(model: nn.Module) -> int:
     return sum(parameter.numel() for parameter in model.parameters())
+
+
+_GENERATION_COMPACT_EVERY = 8
+_GENERATION_COMPACT_FRACTION = 0.125
+
+
+def _generate_token_batch(
+    model: Transformer,
+    prompts: Sequence[Sequence[int]],
+    *,
+    max_new_tokens: int,
+    pad_token: int,
+    eos_token: int,
+    device: torch.device,
+    select_next: Callable[[torch.Tensor], torch.Tensor],
+    autocast_dtype: torch.dtype | None,
+) -> tuple[tuple[int, ...], ...]:
+    input_ids, attention_mask = _stage_generation_prompts(prompts, pad_token, device)
+
+    completion_buffer = torch.full(
+        (len(prompts), max_new_tokens), pad_token, dtype=torch.long, device=device
+    )
+    active_rows = torch.arange(len(prompts), device=device)
+    done = torch.zeros(len(prompts), dtype=torch.bool, device=device)
+    current = input_ids
+    cache: PastKeyValues | None = None
+    for token_index in range(max_new_tokens):
+        with torch.autocast(
+            device_type=device.type,
+            dtype=autocast_dtype,
+            enabled=autocast_dtype is not None,
+        ):
+            output = model(
+                current,
+                attention_mask=attention_mask,
+                past_key_values=cache,
+                use_cache=True,
+            )
+        selected = select_next(output.logits[:, -1])
+        selected = torch.where(done, torch.full_like(selected, pad_token), selected)
+        active = ~done
+        completion_buffer[active_rows[active], token_index] = selected[active]
+        done |= selected.eq(eos_token)
+        current = selected[:, None]
+        attention_mask = torch.cat((attention_mask, active[:, None]), dim=1)
+        cache = output.past_key_values
+
+        if (token_index + 1) % _GENERATION_COMPACT_EVERY == 0:
+            finished_count = int(done.sum().item())
+            if finished_count == len(done):
+                break
+            if finished_count / len(done) >= _GENERATION_COMPACT_FRACTION:
+                keep = (~done).nonzero(as_tuple=False).flatten()
+                active_rows = active_rows.index_select(0, keep)
+                current = current.index_select(0, keep)
+                attention_mask = attention_mask.index_select(0, keep)
+                cache = _compact_cache(cache, keep)
+                done = torch.zeros(len(keep), dtype=torch.bool, device=device)
+
+    return _trim_completion_buffer(completion_buffer, eos_token, max_new_tokens)
