@@ -218,9 +218,9 @@ def _figure(
     color_map = plt.get_cmap("tab10")
     colors = {stage: color_map(stage % 10) for stage in stages}
     metrics = (
-        ("Shortest path", "shortest_rate", "-", "o", 2.8),
-        ("Valid path", "valid_rate", "--", "x", 2.1),
-        ("Format", "format_rate", ":", "^", 1.9),
+        ("Shortest path", "shortest_rate", "-", "o", 1.8),
+        ("Valid path", "valid_rate", "--", "x", 1.35),
+        ("Format", "format_rate", ":", "^", 1.15),
     )
 
     for stage in stages:
@@ -253,7 +253,7 @@ def _figure(
         axis.axvline(
             transition.step,
             color=color,
-            linewidth=1.2,
+            linewidth=0.9,
             alpha=0.38,
         )
         axis.annotate(
@@ -278,7 +278,7 @@ def _figure(
                 [0],
                 [0],
                 color=colors[stage],
-                linewidth=3,
+                linewidth=2,
                 label=f"Stage {stage}{suffix}",
             )
         )
