@@ -1,0 +1,39 @@
+decisions:
+  - abstraction_changed: false
+    node: 019ff1ac-85fa-7afb-a05a-c9b771e5ab6a
+    outcome: confirmed_unchanged
+    rationale: The instrumentation does not alter this neighboring contract, and all of its
+      exact source mappings still resolve.
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-7b67-a90a-b3e0fa498cd8
+    outcome: confirmed_unchanged
+    rationale: The instrumentation does not alter this neighboring contract, and all of its
+      exact source mappings still resolve.
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-7e19-9152-5a90b25959de
+    outcome: confirmed_unchanged
+    rationale: The instrumentation does not alter this neighboring contract, and all of its
+      exact source mappings still resolve.
+  - abstraction_changed: false
+    node: 019ff54c-87f7-704a-b05e-fb972cc40380
+    outcome: confirmed_unchanged
+    rationale: The instrumentation does not alter this neighboring contract, and all of its
+      exact source mappings still resolve.
+  - abstraction_changed: false
+    node: 019ff54c-87f7-7213-ab81-acb27e95126d
+    outcome: confirmed_unchanged
+    rationale: The instrumentation does not alter this neighboring contract, and all of its
+      exact source mappings still resolve.
+  - abstraction_changed: false
+    node: 019ff564-feee-7b48-82b4-6e3eb7fc1197
+    outcome: confirmed_unchanged
+    rationale: The instrumentation does not alter this neighboring contract, and all of its
+      exact source mappings still resolve.
+  - abstraction_changed: false
+    node: 019ff618-792a-7305-903e-a73612370445
+    outcome: confirmed_unchanged
+    rationale: The instrumentation does not alter this neighboring contract, and all of its
+      exact source mappings still resolve.
+direction: code-led
+id: 01a02852-f325-7ec8-b75e-f0feea73d743
+rationale: Confirm neighboring contracts remain accurate after objective-gradient instrumentation.
