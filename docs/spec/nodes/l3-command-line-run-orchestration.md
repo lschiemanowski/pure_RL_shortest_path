@@ -7,3 +7,5 @@ Each training step samples curriculum problems, collects unconstrained on-policy
 Standalone evaluation restores only the selected actor and model configuration. Its TOML declares one or more named graph-problem sets with exact example and generation seeds plus a common greedy or identified stochastic sampling protocol. It writes exact metrics and every completion to a new evaluation directory without constructing an optimizer or value head and without mutating the checkpoint.
 
 Normal completion writes a final checkpoint and terminal event. A first interrupt is deferred to the next completed-step boundary, which writes an interruption checkpoint and event before propagating the interrupt. The package entry point remains a small dispatcher; experiment semantics and artifact behavior reside in the run implementation.
+
+At GRPO steps that coincide with the evaluation interval, orchestration requests objective-gradient diagnostics for that update. Other steps omit this additional measurement.

@@ -122,6 +122,11 @@ covers:
                     "kl_coefficient": configuration.grpo.kl_coefficient,
                     "valid_coefficient": configuration.grpo.valid_coefficient,
                 }
+                if update.gradient_diagnostics is not None:
+                    optimizer_metrics["gradient_diagnostics"] = {
+                        "measurement": "full_batch_pre_clip",
+                        "epochs": _plain_data(update.gradient_diagnostics),
+                    }
             return {
                 "algorithm": configuration.algorithm,
                 "frontier": batch.frontier,
@@ -231,6 +236,11 @@ anchors:
                         "kl_coefficient": configuration.grpo.kl_coefficient,
                         "valid_coefficient": configuration.grpo.valid_coefficient,
                     }
+                    if update.gradient_diagnostics is not None:
+                        optimizer_metrics["gradient_diagnostics"] = {
+                            "measurement": "full_batch_pre_clip",
+                            "epochs": _plain_data(update.gradient_diagnostics),
+                        }
                 return {
                     "algorithm": configuration.algorithm,
                     "frontier": batch.frontier,
@@ -339,6 +349,22 @@ anchors:
                     resolved_configuration_record(right),
                 )
                 return tuple(differences)
+  - id: 01a02841-f522-7700-96c2-45737b1a1439
+    selector:
+      quote: 'When requested, a GRPO training record stores one full-batch pre-clipping diagnostic
+        per update epoch: norms for the policy objective, coefficient-weighted KL term, coefficient-weighted
+        valid-next term, and their combined gradient, plus all pairwise cosine similarities.'
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 01a02842-99cf-78f8-8705-5bce01f1fbef
+        selector:
+          quote: |2-
+                    if update.gradient_diagnostics is not None:
+                        optimizer_metrics["gradient_diagnostics"] = {
+                            "measurement": "full_batch_pre_clip",
+                            "epochs": _plain_data(update.gradient_diagnostics),
+                        }
 references:
   - id: 019fef85-58fe-769d-b675-e1466eae3bff
     kind: contractual

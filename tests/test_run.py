@@ -422,6 +422,11 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
             self.assertEqual(
                 training_record["sterile_repetition_mode"], "off_answer"
             )
+            diagnostics = training_record["gradient_diagnostics"]
+            self.assertEqual(diagnostics["measurement"], "full_batch_pre_clip")
+            self.assertEqual(len(diagnostics["epochs"]), 1)
+            self.assertIn("policy_norm", diagnostics["epochs"][0])
+            self.assertIn("policy_valid_cosine", diagnostics["epochs"][0])
 
     def test_resume_compatibility_separates_hard_and_derived_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

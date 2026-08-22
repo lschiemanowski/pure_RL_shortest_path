@@ -435,6 +435,115 @@ class GRPOUpdateTests(unittest.TestCase):
         self.assertAlmostEqual(full_metrics.policy_loss, micro_metrics.policy_loss, places=6)
         self.assertAlmostEqual(full_metrics.valid_loss, micro_metrics.valid_loss, places=6)
 
+    def test_gradient_diagnostics_preserve_the_optimizer_update(self) -> None:
+        torch.manual_seed(47)
+        ordinary_model = self.model()
+        diagnostic_model = deepcopy(ordinary_model)
+        reference = deepcopy(ordinary_model)
+        with torch.no_grad():
+            next(reference.parameters()).add_(0.05)
+        packed = pack_rollouts(
+            self.rollouts, self.vocabulary, device=torch.device("cpu")
+        )
+        ordinary_optimizer = torch.optim.SGD(ordinary_model.parameters(), lr=0.01)
+        diagnostic_optimizer = torch.optim.SGD(
+            diagnostic_model.parameters(), lr=0.01
+        )
+        config = GRPOConfig(
+            group_size=2,
+            update_epochs=2,
+            microbatch_size=2,
+            kl_coefficient=0.1,
+            valid_coefficient=0.2,
+        )
+
+        ordinary = grpo_update(
+            ordinary_model,
+            reference,
+            ordinary_optimizer,
+            packed,
+            config,
+        )
+        measured = grpo_update(
+            diagnostic_model,
+            reference,
+            diagnostic_optimizer,
+            packed,
+            config,
+            measure_gradient_diagnostics=True,
+        )
+
+        self.assertIsNone(ordinary.gradient_diagnostics)
+        self.assertIsNotNone(measured.gradient_diagnostics)
+        assert measured.gradient_diagnostics is not None
+        self.assertEqual(len(measured.gradient_diagnostics), 2)
+        self.assertAlmostEqual(
+            sum(
+                diagnostic.combined_norm
+                for diagnostic in measured.gradient_diagnostics
+            )
+            / 2,
+            measured.gradient_norm,
+            places=6,
+        )
+        for diagnostic in measured.gradient_diagnostics:
+            self.assertGreater(diagnostic.policy_norm, 0.0)
+            self.assertGreater(diagnostic.weighted_kl_norm, 0.0)
+            self.assertGreater(diagnostic.weighted_valid_norm, 0.0)
+            for cosine in (
+                diagnostic.policy_kl_cosine,
+                diagnostic.policy_valid_cosine,
+                diagnostic.kl_valid_cosine,
+            ):
+                self.assertIsNotNone(cosine)
+                assert cosine is not None
+                self.assertGreaterEqual(cosine, -1.0)
+                self.assertLessEqual(cosine, 1.0)
+        for ordinary_parameter, diagnostic_parameter in zip(
+            ordinary_model.parameters(), diagnostic_model.parameters()
+        ):
+            torch.testing.assert_close(
+                ordinary_parameter,
+                diagnostic_parameter,
+                rtol=0.0,
+                atol=0.0,
+            )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    def test_gradient_diagnostics_run_with_cuda_autocast(self) -> None:
+        torch.manual_seed(53)
+        model = self.model().to("cuda")
+        reference = deepcopy(model)
+        packed = pack_rollouts(
+            self.rollouts, self.vocabulary, device=torch.device("cuda")
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        metrics = grpo_update(
+            model,
+            reference,
+            optimizer,
+            packed,
+            GRPOConfig(
+                group_size=2,
+                update_epochs=2,
+                microbatch_size=2,
+                kl_coefficient=0.1,
+                valid_coefficient=0.2,
+            ),
+            autocast_dtype=torch.bfloat16,
+            measure_gradient_diagnostics=True,
+        )
+
+        self.assertIsNotNone(metrics.gradient_diagnostics)
+        assert metrics.gradient_diagnostics is not None
+        self.assertEqual(len(metrics.gradient_diagnostics), 2)
+        for diagnostic in metrics.gradient_diagnostics:
+            self.assertTrue(
+                torch.isfinite(torch.tensor(diagnostic.combined_norm)).item()
+            )
+            self.assertGreater(diagnostic.combined_norm, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

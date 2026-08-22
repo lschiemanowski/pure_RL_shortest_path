@@ -9,3 +9,5 @@ Independent evaluation records retain the policy identity, graph-problem and pro
 At the declared interval, representative completions are selected by taking the first sampled completion for each of the first declared number of problems. Each record preserves graph and query semantics, prompt and completion tokens and text, parsed and verified facts, and separate reward components. This deterministic rule does not select examples by success.
 
 Configuration comparison recursively reports stable field paths whose values differ. It exposes experimental differences without deciding that the corresponding evidence is scientifically comparable.
+
+When requested, a GRPO training record stores one full-batch pre-clipping diagnostic per update epoch: norms for the policy objective, coefficient-weighted KL term, coefficient-weighted valid-next term, and their combined gradient, plus all pairwise cosine similarities.

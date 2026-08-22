@@ -1,0 +1,22 @@
+decisions:
+  - abstraction_changed: false
+    node: 019ff1ac-85fb-77ba-9d70-ff230d27971b
+    outcome: revised
+    rationale: The GRPO contract now specifies optional full-batch pre-clipping component-gradient
+      diagnostics; the L2 update contract remains unchanged because optimization semantics
+      are preserved.
+  - abstraction_changed: false
+    node: 019ff566-c44f-774b-ba4c-8b2dc0509fe6
+    outcome: revised
+    rationale: The orchestration contract now schedules diagnostics at GRPO evaluation intervals;
+      the parent configuration and provenance contract remains accurate.
+  - abstraction_changed: false
+    node: 019ff566-c44f-7e89-9f82-0d916901384c
+    outcome: revised
+    rationale: The evidence contract now records per-epoch component gradient norms and cosine
+      similarities when requested; its L2 auditability contract already encompasses gradient
+      metrics.
+direction: code-led
+id: 01a0284d-a088-7177-a7c4-b8a3464da774
+rationale: Reconcile periodic GRPO objective-gradient diagnostics with update, orchestration,
+  and evidence contracts.

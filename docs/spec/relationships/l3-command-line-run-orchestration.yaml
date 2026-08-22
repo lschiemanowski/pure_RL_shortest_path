@@ -72,6 +72,9 @@ covers:
                             packed,
                             configuration.grpo,
                             autocast_dtype=autocast_dtype,
+                            measure_gradient_diagnostics=(
+                                (step + 1) % configuration.evaluation.every_steps == 0
+                            ),
                         )
                     else:
                         assert value_head is not None
@@ -235,6 +238,9 @@ anchors:
                                 packed,
                                 configuration.grpo,
                                 autocast_dtype=autocast_dtype,
+                                measure_gradient_diagnostics=(
+                                    (step + 1) % configuration.evaluation.every_steps == 0
+                                ),
                             )
                         else:
                             assert value_head is not None
@@ -337,6 +343,19 @@ anchors:
                         "run_interrupted", step, {"checkpoint": str(latest_checkpoint)}
                     )
                     raise
+  - id: 01a02841-f522-7c20-bf8a-dab78f3bb334
+    selector:
+      quote: At GRPO steps that coincide with the evaluation interval, orchestration requests
+        objective-gradient diagnostics for that update. Other steps omit this additional measurement.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 01a02841-f522-79e9-8fe5-58b293f05602
+        selector:
+          quote: |2-
+                                measure_gradient_diagnostics=(
+                                    (step + 1) % configuration.evaluation.every_steps == 0
+                                ),
 references:
   - id: 019fef85-58fe-7cea-922e-23d922a1f3df
     kind: contractual

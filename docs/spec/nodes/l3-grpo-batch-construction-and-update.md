@@ -34,3 +34,5 @@ L=L_{\mathrm{policy}}+\beta_{\mathrm{KL}}L_{\mathrm{KL}}
 Microbatches preserve these global normalizations. Their gradients accumulate
 over the whole rollout batch, followed by one global gradient clipping operation
 and one optimizer step per update epoch. Only the current policy is updated.
+
+Optional diagnostics measure, for each update epoch and over the complete accumulated rollout batch before clipping, the parameter-gradient norms of the policy objective, coefficient-weighted KL term, coefficient-weighted valid-next term, and combined loss, plus pairwise cosine similarities among the three components. Diagnostic extraction does not populate optimizer gradients or alter the ensuing combined backward pass, clipping, or optimizer step.

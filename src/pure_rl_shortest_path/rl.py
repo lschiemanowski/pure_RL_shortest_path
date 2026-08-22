@@ -522,6 +522,18 @@ class GRPOConfig:
 
 
 @dataclass(frozen=True)
+class ObjectiveGradientDiagnostics:
+    epoch: int
+    policy_norm: float
+    weighted_kl_norm: float
+    weighted_valid_norm: float
+    combined_norm: float
+    policy_kl_cosine: float | None
+    policy_valid_cosine: float | None
+    kl_valid_cosine: float | None
+
+
+@dataclass(frozen=True)
 class UpdateMetrics:
     policy_loss: float
     sampled_kl: float
@@ -530,6 +542,72 @@ class UpdateMetrics:
     total_loss: float
     zero_variance_group_fraction: float
     gradient_norm: float
+    gradient_diagnostics: tuple[ObjectiveGradientDiagnostics, ...] | None = None
+
+
+def _accumulate_objective_gradients(
+    loss: torch.Tensor,
+    parameters: tuple[nn.Parameter, ...],
+    accumulated: tuple[torch.Tensor, ...],
+) -> None:
+    gradients = torch.autograd.grad(
+        loss,
+        parameters,
+        retain_graph=True,
+        allow_unused=True,
+    )
+    with torch.no_grad():
+        for destination, gradient in zip(accumulated, gradients):
+            if gradient is not None:
+                destination.add_(gradient)
+
+
+def _gradient_inner_product(
+    left: Sequence[torch.Tensor], right: Sequence[torch.Tensor]
+) -> torch.Tensor:
+    if len(left) != len(right):
+        raise ValueError("gradient collections must have equal length")
+    if not left:
+        return torch.tensor(0.0)
+    total = left[0].new_zeros(())
+    for left_gradient, right_gradient in zip(left, right):
+        total.add_((left_gradient * right_gradient).sum())
+    return total
+
+
+def _gradient_norm(gradients: Sequence[torch.Tensor]) -> float:
+    return math.sqrt(max(float(_gradient_inner_product(gradients, gradients)), 0.0))
+
+
+def _gradient_cosine(
+    left: Sequence[torch.Tensor], right: Sequence[torch.Tensor]
+) -> float | None:
+    left_norm = _gradient_norm(left)
+    right_norm = _gradient_norm(right)
+    if left_norm == 0.0 or right_norm == 0.0:
+        return None
+    cosine = float(_gradient_inner_product(left, right)) / (left_norm * right_norm)
+    return max(-1.0, min(1.0, cosine))
+
+
+def _objective_gradient_diagnostics(
+    *,
+    epoch: int,
+    policy: tuple[torch.Tensor, ...],
+    weighted_kl: tuple[torch.Tensor, ...],
+    weighted_valid: tuple[torch.Tensor, ...],
+    combined: tuple[torch.Tensor, ...],
+) -> ObjectiveGradientDiagnostics:
+    return ObjectiveGradientDiagnostics(
+        epoch=epoch,
+        policy_norm=_gradient_norm(policy),
+        weighted_kl_norm=_gradient_norm(weighted_kl),
+        weighted_valid_norm=_gradient_norm(weighted_valid),
+        combined_norm=_gradient_norm(combined),
+        policy_kl_cosine=_gradient_cosine(policy, weighted_kl),
+        policy_valid_cosine=_gradient_cosine(policy, weighted_valid),
+        kl_valid_cosine=_gradient_cosine(weighted_kl, weighted_valid),
+    )
 
 
 def group_relative_advantages(
@@ -611,8 +689,9 @@ def grpo_update(
     config: GRPOConfig,
     *,
     autocast_dtype: torch.dtype | None = None,
+    measure_gradient_diagnostics: bool = False,
 ) -> UpdateMetrics:
-    """Update the current policy from its fixed grouped rollout batch."""
+    """Update the current policy and optionally measure objective gradients."""
 
     if packed.input_ids.shape[0] == 0:
         raise ValueError("packed rollout batch must be nonempty")
@@ -640,11 +719,25 @@ def grpo_update(
         "valid_mass": 0.0,
         "gradient_norm": 0.0,
     }
+    parameters = tuple(
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    )
+    gradient_diagnostics: list[ObjectiveGradientDiagnostics] = []
 
     model.train()
-    for _ in range(config.update_epochs):
+    for epoch_index in range(config.update_epochs):
         optimizer.zero_grad(set_to_none=True)
         epoch = {key: 0.0 for key in totals if key != "gradient_norm"}
+        if measure_gradient_diagnostics:
+            policy_gradients = tuple(
+                torch.zeros_like(parameter) for parameter in parameters
+            )
+            weighted_kl_gradients = tuple(
+                torch.zeros_like(parameter) for parameter in parameters
+            )
+            weighted_valid_gradients = tuple(
+                torch.zeros_like(parameter) for parameter in parameters
+            )
         for start in range(0, batch_size, config.microbatch_size):
             end = min(start + config.microbatch_size, batch_size)
             chunk = packed.slice(start, end)
@@ -708,10 +801,18 @@ def grpo_update(
                     valid_loss = logits.sum() * 0.0
                     valid_mass = logits.sum() * 0.0
 
-                loss = (
-                    policy_loss
-                    + config.kl_coefficient * sampled_kl
-                    + config.valid_coefficient * valid_loss
+                weighted_kl = config.kl_coefficient * sampled_kl
+                weighted_valid = config.valid_coefficient * valid_loss
+                loss = policy_loss + weighted_kl + weighted_valid
+            if measure_gradient_diagnostics:
+                _accumulate_objective_gradients(
+                    policy_loss, parameters, policy_gradients
+                )
+                _accumulate_objective_gradients(
+                    weighted_kl, parameters, weighted_kl_gradients
+                )
+                _accumulate_objective_gradients(
+                    weighted_valid, parameters, weighted_valid_gradients
                 )
             loss.backward()
             epoch["policy_loss"] += float(policy_loss.detach().item())
@@ -719,6 +820,22 @@ def grpo_update(
             epoch["valid_loss"] += float(valid_loss.detach().item())
             epoch["valid_mass"] += float(valid_mass.detach().item())
 
+        if measure_gradient_diagnostics:
+            combined_gradients = tuple(
+                parameter.grad.detach()
+                if parameter.grad is not None
+                else torch.zeros_like(parameter)
+                for parameter in parameters
+            )
+            gradient_diagnostics.append(
+                _objective_gradient_diagnostics(
+                    epoch=epoch_index + 1,
+                    policy=policy_gradients,
+                    weighted_kl=weighted_kl_gradients,
+                    weighted_valid=weighted_valid_gradients,
+                    combined=combined_gradients,
+                )
+            )
         gradient_norm = nn.utils.clip_grad_norm_(
             model.parameters(), config.gradient_clip
         )
@@ -743,4 +860,7 @@ def grpo_update(
         ),
         zero_variance_group_fraction=zero_variance_fraction,
         gradient_norm=totals["gradient_norm"] * scale,
+        gradient_diagnostics=(
+            tuple(gradient_diagnostics) if measure_gradient_diagnostics else None
+        ),
     )

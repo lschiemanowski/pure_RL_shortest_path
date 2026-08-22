@@ -1269,6 +1269,11 @@ def training_evidence_payload(
             "kl_coefficient": configuration.grpo.kl_coefficient,
             "valid_coefficient": configuration.grpo.valid_coefficient,
         }
+        if update.gradient_diagnostics is not None:
+            optimizer_metrics["gradient_diagnostics"] = {
+                "measurement": "full_batch_pre_clip",
+                "epochs": _plain_data(update.gradient_diagnostics),
+            }
     return {
         "algorithm": configuration.algorithm,
         "frontier": batch.frontier,
@@ -1543,6 +1548,9 @@ def execute_training(
                     packed,
                     configuration.grpo,
                     autocast_dtype=autocast_dtype,
+                    measure_gradient_diagnostics=(
+                        (step + 1) % configuration.evaluation.every_steps == 0
+                    ),
                 )
             else:
                 assert value_head is not None
