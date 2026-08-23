@@ -366,7 +366,17 @@ def _figure(
     axis.xaxis.set_major_locator(MultipleLocator(10_000))
     axis.xaxis.set_minor_locator(MultipleLocator(1_000))
     axis.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value):,}"))
-    axis.tick_params(axis="x", which="minor", length=3, color="#888888")
+    axis.tick_params(axis="x", which="major", length=5, width=1.2)
+    axis.tick_params(
+        axis="x", which="minor", length=3, width=0.6, color="#888888"
+    )
+    minor_locations = axis.xaxis.get_minorticklocs()
+    minor_ticks = axis.xaxis.get_minor_ticks(len(minor_locations))
+    for location, tick in zip(minor_locations, minor_ticks, strict=True):
+        if round(location) % 5_000 == 0:
+            for tick_line in (tick.tick1line, tick.tick2line):
+                tick_line.set_markersize(5)
+                tick_line.set_markeredgewidth(1.2)
     axis.grid(axis="y", color="#c7c7c7", alpha=0.5, linewidth=0.7)
     axis.grid(axis="x", color="#dddddd", alpha=0.25, linewidth=0.5)
     axis.spines[["top", "right"]].set_visible(False)

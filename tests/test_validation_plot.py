@@ -175,6 +175,15 @@ class ValidationPlotTests(unittest.TestCase):
         major_locations = axis.xaxis.get_major_locator().tick_values(0, 25_000)
         minor_locations = axis.xaxis.get_minor_locator().tick_values(0, 25_000)
         major_formatter = axis.xaxis.get_major_formatter()
+        figure.canvas.draw()
+        major_widths = {
+            int(tick.get_loc()): tick.tick1line.get_markeredgewidth()
+            for tick in axis.xaxis.get_major_ticks()
+        }
+        minor_widths = {
+            int(tick.get_loc()): tick.tick1line.get_markeredgewidth()
+            for tick in axis.xaxis.get_minor_ticks()
+        }
         plot.plt.close(figure)
 
         self.assertTrue(
@@ -190,6 +199,8 @@ class ValidationPlotTests(unittest.TestCase):
             )
         )
         self.assertEqual(major_formatter(10_000, 0), "10,000")
+        self.assertGreater(major_widths[10_000], minor_widths[6_000])
+        self.assertGreater(minor_widths[5_000], minor_widths[6_000])
 
     def test_follows_parent_checkpoint_lineage_and_keeps_parent_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
