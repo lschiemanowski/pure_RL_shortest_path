@@ -27,6 +27,8 @@ from matplotlib.ticker import FuncFormatter, MultipleLocator
 
 plt.rcParams["svg.fonttype"] = "none"
 
+MOVING_AVERAGE_WINDOW = 5
+
 
 @dataclass(frozen=True)
 class ValidationPoint:
@@ -44,6 +46,17 @@ class CurriculumTransition:
     step: int
     completed_frontier: int
     new_frontier: int
+
+
+def trailing_average(values: list[float], window: int) -> list[float]:
+    result: list[float] = []
+    running_total = 0.0
+    for index, value in enumerate(values):
+        running_total += value
+        if index >= window:
+            running_total -= values[index - window]
+        result.append(running_total / min(index + 1, window))
+    return result
 
 
 def _rate(metrics: dict[str, object], rate_key: str, count_key: str) -> float:
@@ -218,33 +231,43 @@ def _figure(
     color_map = plt.get_cmap("tab10")
     colors = {stage: color_map(stage % 10) for stage in stages}
     metrics = (
-        ("Shortest path", "shortest_rate", "-", "o", 1.8),
-        ("Valid path", "valid_rate", "--", "x", 1.35),
-        ("Format", "format_rate", ":", "^", 1.15),
+        ("Shortest path", "shortest_rate", "-", "o", 2.4, 10, 0.16, 0.0),
+        ("Valid path", "valid_rate", "--", "x", 1.8, 9, 0.12, 0.7),
+        ("Format", "format_rate", ":", "^", 1.4, 10, 0.10, 0.4),
     )
 
     for stage in stages:
         stage_points = [point for point in points if point.frontier == stage]
         steps = [point.step for point in stage_points]
         color = colors[stage]
-        for _, attribute, line_style, marker, width in metrics:
+        for (
+            _,
+            attribute,
+            line_style,
+            marker,
+            width,
+            point_size,
+            point_alpha,
+            point_width,
+        ) in metrics:
             values = [100.0 * getattr(point, attribute) for point in stage_points]
-            axis.plot(
+            axis.scatter(
                 steps,
                 values,
+                s=point_size,
+                marker=marker,
+                color=color,
+                alpha=point_alpha,
+                linewidths=point_width,
+                zorder=2,
+            )
+            axis.plot(
+                steps,
+                trailing_average(values, MOVING_AVERAGE_WINDOW),
                 color=color,
                 linewidth=width,
                 linestyle=line_style,
                 solid_capstyle="round",
-            )
-            axis.scatter(
-                steps,
-                values,
-                s=30 if marker != "x" else 35,
-                marker=marker,
-                color=color,
-                alpha=0.30,
-                linewidths=0.9 if marker == "x" else 0,
                 zorder=3,
             )
 
@@ -293,7 +316,16 @@ def _figure(
             markersize=4,
             label=label,
         )
-        for label, _, line_style, marker, width in metrics
+        for (
+            label,
+            _,
+            line_style,
+            marker,
+            width,
+            _,
+            _,
+            _,
+        ) in metrics
     ]
     if stage_handles:
         stage_legend = axis.legend(
@@ -318,8 +350,8 @@ def _figure(
         0.5,
         1.008,
         (
-            "Exact 256-example validations every 100 steps; "
-            "metric lines are segmented at curriculum transitions"
+            f"Trailing moving average over {MOVING_AVERAGE_WINDOW} validations "
+            "within each stage; raw observations shown faintly"
         ),
         transform=axis.transAxes,
         ha="center",

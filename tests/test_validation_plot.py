@@ -135,6 +135,32 @@ class ValidationPlotTests(unittest.TestCase):
             self.assertIn((300, 400), line_steps)
             self.assertNotIn((200, 300), line_steps)
 
+    def test_smooths_each_stage_over_five_faint_raw_observations(self) -> None:
+        points = (
+            plot.ValidationPoint(100, 0, 256, 0.5, 0.3, 0.1),
+            plot.ValidationPoint(200, 0, 256, 0.7, 0.5, 0.3),
+            plot.ValidationPoint(300, 0, 256, 0.9, 0.7, 0.5),
+        )
+        figure = plot._figure(
+            points,
+            (),
+            run_name="test-run",
+            updated_at=datetime(2026, 8, 19, tzinfo=timezone.utc),
+        )
+        axis = figure.axes[0]
+        shortest_line = next(
+            line for line in axis.lines if line.get_linestyle() == "-"
+        )
+        raw_alphas = [collection.get_alpha() for collection in axis.collections]
+        plot.plt.close(figure)
+
+        self.assertEqual(tuple(shortest_line.get_xdata()), (100, 200, 300))
+        self.assertEqual(tuple(shortest_line.get_ydata()), (10.0, 20.0, 30.0))
+        self.assertEqual(len(raw_alphas), 3)
+        self.assertTrue(
+            all(alpha is not None and alpha <= 0.16 for alpha in raw_alphas)
+        )
+
     def test_uses_thousand_step_ticks_and_labels_only_ten_thousand_steps(self) -> None:
         figure = plot._figure(
             (
