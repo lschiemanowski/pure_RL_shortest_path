@@ -135,6 +135,36 @@ class ValidationPlotTests(unittest.TestCase):
             self.assertIn((300, 400), line_steps)
             self.assertNotIn((200, 300), line_steps)
 
+    def test_uses_thousand_step_ticks_and_labels_only_ten_thousand_steps(self) -> None:
+        figure = plot._figure(
+            (
+                plot.ValidationPoint(0, 0, 256, 0.5, 0.25, 0.125),
+                plot.ValidationPoint(25_000, 0, 256, 0.75, 0.5, 0.25),
+            ),
+            (),
+            run_name="test-run",
+            updated_at=datetime(2026, 8, 19, tzinfo=timezone.utc),
+        )
+        axis = figure.axes[0]
+        major_locations = axis.xaxis.get_major_locator().tick_values(0, 25_000)
+        minor_locations = axis.xaxis.get_minor_locator().tick_values(0, 25_000)
+        major_formatter = axis.xaxis.get_major_formatter()
+        plot.plt.close(figure)
+
+        self.assertTrue(
+            all(
+                right - left == 10_000
+                for left, right in zip(major_locations, major_locations[1:])
+            )
+        )
+        self.assertTrue(
+            all(
+                right - left == 1_000
+                for left, right in zip(minor_locations, minor_locations[1:])
+            )
+        )
+        self.assertEqual(major_formatter(10_000, 0), "10,000")
+
     def test_follows_parent_checkpoint_lineage_and_keeps_parent_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

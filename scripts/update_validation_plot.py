@@ -23,7 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FuncFormatter, MultipleLocator
 
 plt.rcParams["svg.fonttype"] = "none"
 
@@ -331,7 +331,10 @@ def _figure(
     axis.set_ylabel("Validation performance (%)")
     axis.set_ylim(-2, 102)
     axis.set_yticks(range(0, 101, 10))
+    axis.xaxis.set_major_locator(MultipleLocator(10_000))
+    axis.xaxis.set_minor_locator(MultipleLocator(1_000))
     axis.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value):,}"))
+    axis.tick_params(axis="x", which="minor", length=3, color="#888888")
     axis.grid(axis="y", color="#c7c7c7", alpha=0.5, linewidth=0.7)
     axis.grid(axis="x", color="#dddddd", alpha=0.25, linewidth=0.5)
     axis.spines[["top", "right"]].set_visible(False)
