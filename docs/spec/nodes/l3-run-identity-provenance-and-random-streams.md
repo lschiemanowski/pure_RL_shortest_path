@@ -9,9 +9,12 @@ command. Starting a fresh run in an existing run directory is rejected. The sele
 One declared master seed deterministically produces separately named random
 streams for model initialization, training-problem construction, rollout
 sampling, curriculum validation, evaluation-problem construction, and
-evaluation sampling. Seed derivation is stable and does not depend on
-process-local hashing. The resolved seeds are recorded explicitly so that
-independence between streams can be inspected rather than inferred.
+evaluation sampling. An explicitly derived resume may instead declare an RNG
+fork seed, rederiving every named stream without changing the checkpoint's
+learned, optimizer, or curriculum state. Seed derivation is stable and does not
+depend on process-local hashing. The resolved seeds and any override are
+recorded explicitly so that independence between streams can be inspected
+rather than inferred.
 
 Runs from a modified source tree are rejected by default. If explicitly
 permitted for exploratory work, the dirty status and an exact source patch are

@@ -35,6 +35,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="operational stopping-step override",
     )
+    resume.add_argument(
+        "--rng-seed",
+        type=int,
+        help=(
+            "create a derived run with freshly seeded training, rollout, and "
+            "evaluation random streams"
+        ),
+    )
 
     evaluate = commands.add_parser(
         "evaluate", help="evaluate one checkpoint without training"
@@ -61,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             source_repository=repository,
             configuration_path=arguments.config,
             max_steps=arguments.max_steps,
+            rng_seed=arguments.rng_seed,
             command=command,
         )
         print(result.final_checkpoint)

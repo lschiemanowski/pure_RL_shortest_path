@@ -18,6 +18,7 @@ covers:
             checkpoint: LoadedCheckpoint | None = None,
             derived_run: bool = False,
             max_steps_override: int | None = None,
+            restore_random_state: bool = True,
         ) -> TrainingRunResult:
             """Run or resume the complete on-policy curriculum training protocol."""
   - path: src/pure_rl_shortest_path/run.py
@@ -276,25 +277,6 @@ anchors:
                 policy = Transformer(checkpoint.configuration.model).to(device)
                 policy.load_state_dict(checkpoint.payload["policy"])
                 policy.eval()
-  - id: 019ff566-c44f-79e5-adc2-9072dbd49def
-    selector:
-      quote: The command line exposes fresh training, checkpoint resumption, and checkpoint
-        evaluation as distinct operations. Fresh training accepts one experiment TOML. Resumption
-        accepts a checkpoint, an optional compatible TOML for an explicitly derived run, and
-        an operational stopping-step override. Evaluation accepts a checkpoint and a separate
-        evaluation TOML. Scientific settings are not duplicated as command-line flags.
-    links:
-      - path: src/pure_rl_shortest_path/__main__.py
-        kind: contractual
-        code_anchor: 019ff566-c44f-78ab-ab76-fd46aeeaf1c5
-        selector:
-          quote: |-
-            def build_parser() -> argparse.ArgumentParser:
-                parser = argparse.ArgumentParser(
-                    prog="pure_rl_shortest_path",
-                    description="Train and evaluate the pure-RL shortest-path policy.",
-                )
-                commands = parser.add_subparsers(dest="command", required=True)
   - id: 019ff564-feee-766e-a0a7-dda9c7f5bfbf
     selector:
       quote: Normal completion writes a final checkpoint and terminal event. A first interrupt
@@ -356,6 +338,40 @@ anchors:
                                 measure_gradient_diagnostics=(
                                     (step + 1) % configuration.evaluation.every_steps == 0
                                 ),
+  - id: 019ff566-c44f-79e5-adc2-9072dbd49def
+    selector:
+      quote: The command line exposes fresh training, checkpoint resumption, and checkpoint
+        evaluation as distinct operations. Fresh training accepts one experiment TOML. Resumption
+        accepts a checkpoint, an optional compatible TOML for an explicitly derived run, an
+        operational stopping-step override, and an optional RNG-fork seed that is valid only
+        for a derived run. Evaluation accepts a checkpoint and a separate evaluation TOML.
+        Other scientific settings are not duplicated as command-line flags.
+    links:
+      - path: src/pure_rl_shortest_path/__main__.py
+        kind: contractual
+        code_anchor: 019ff566-c44f-78ab-ab76-fd46aeeaf1c5
+        selector:
+          quote: |2-
+                resume = commands.add_parser("resume", help="continue from a checkpoint")
+                resume.add_argument("checkpoint", type=Path)
+                resume.add_argument(
+                    "--config",
+                    type=Path,
+                    help="create a derived run with compatible changed settings",
+                )
+                resume.add_argument(
+                    "--max-steps",
+                    type=int,
+                    help="operational stopping-step override",
+                )
+                resume.add_argument(
+                    "--rng-seed",
+                    type=int,
+                    help=(
+                        "create a derived run with freshly seeded training, rollout, and "
+                        "evaluation random streams"
+                    ),
+                )
 references:
   - id: 019fef85-58fe-7cea-922e-23d922a1f3df
     kind: contractual

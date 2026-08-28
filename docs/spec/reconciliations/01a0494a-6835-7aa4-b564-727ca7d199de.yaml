@@ -1,0 +1,19 @@
+decisions:
+  - abstraction_changed: false
+    node: 019ff54c-87f7-7213-ab81-acb27e95126d
+    outcome: revised
+    rationale: Revise the random-stream contract to expose and record explicit derived-run
+      RNG forks.
+  - abstraction_changed: false
+    node: 019ff564-feee-7b48-82b4-6e3eb7fc1197
+    outcome: revised
+    rationale: Revise checkpoint resumption to distinguish exact replay from an explicit RNG-forked
+      derived run.
+  - abstraction_changed: false
+    node: 019ff566-c44f-774b-ba4c-8b2dc0509fe6
+    outcome: revised
+    rationale: Revise command-line orchestration to expose the derived-run-only RNG seed option.
+direction: code-led
+id: 01a0494a-6835-7aa4-b564-727ca7d199de
+rationale: Add an explicit, provenance-recorded RNG trajectory fork for derived checkpoint
+  resumes while retaining exact random-state restoration by default.

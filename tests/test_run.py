@@ -16,6 +16,7 @@ from pure_rl_shortest_path.run import (
     ConfigurationError,
     LoadedRunConfiguration,
     configuration_differences,
+    create_random_streams,
     derive_named_seeds,
     execute_standalone_evaluation,
     execute_training,
@@ -252,6 +253,28 @@ class RunConfigurationTests(unittest.TestCase):
         self.assertIn("training_problems", first)
         self.assertIn("evaluation_problems", first)
 
+    def test_rng_seed_override_is_recorded_and_drives_named_seeds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            repository.mkdir()
+            run_git(repository, "init", "-q")
+            run_git(repository, "config", "user.name", "Test Researcher")
+            run_git(repository, "config", "user.email", "test@example.com")
+            config_path = repository / "experiment.toml"
+            config_path.write_text(BASE_CONFIG, encoding="utf-8")
+            run_git(repository, "add", "experiment.toml")
+            run_git(repository, "commit", "-q", "-m", "initial")
+
+            initialized = initialize_run(
+                load_run_configuration(config_path),
+                source_repository=repository,
+                rng_seed_override=99,
+            )
+
+            self.assertEqual(initialized.provenance.rng_seed_override, 99)
+            self.assertEqual(initialized.provenance.seeds, derive_named_seeds(99))
+
 
 class RunInitializationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -427,6 +450,57 @@ class CheckpointEvidenceAndLoopTests(unittest.TestCase):
             self.assertEqual(len(diagnostics["epochs"]), 1)
             self.assertIn("policy_norm", diagnostics["epochs"][0])
             self.assertIn("policy_valid_cosine", diagnostics["epochs"][0])
+
+    def test_derived_resume_can_replace_checkpoint_random_streams(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            loaded = self.load_fast(root)
+            original = root / "original"
+            forked = root / "forked"
+            original.mkdir()
+            forked.mkdir()
+            original_seeds = derive_named_seeds(loaded.resolved.master_seed)
+            forked_seeds = derive_named_seeds(99)
+
+            first = execute_training(
+                run_directory=original,
+                run_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                configuration=loaded.resolved,
+                seeds=original_seeds,
+            )
+            checkpoint = load_training_checkpoint(first.final_checkpoint)
+            result = execute_training(
+                run_directory=forked,
+                run_id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                configuration=loaded.resolved,
+                seeds=forked_seeds,
+                checkpoint=checkpoint,
+                derived_run=True,
+                max_steps_override=checkpoint.step,
+                restore_random_state=False,
+            )
+
+            resumed = load_training_checkpoint(result.final_checkpoint)
+            expected = create_random_streams(forked_seeds).state_dict()
+            actual = resumed.payload["random_streams"]
+            self.assertEqual(
+                actual["training_problems"], expected["training_problems"]
+            )
+            self.assertTrue(
+                torch.equal(actual["rollout_sampling"], expected["rollout_sampling"])
+            )
+            self.assertNotEqual(
+                actual["training_problems"],
+                checkpoint.payload["random_streams"]["training_problems"],
+            )
+            events = [
+                json.loads(line)
+                for line in (forked / "metrics.jsonl").read_text().splitlines()
+            ]
+            resumed_event = next(
+                event for event in events if event["kind"] == "run_resumed"
+            )
+            self.assertFalse(resumed_event["random_state_restored"])
 
     def test_resume_compatibility_separates_hard_and_derived_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -6,4 +6,10 @@ A checkpoint is first written to a temporary sibling and then atomically install
 
 Loading validates the checkpoint schema, presence of PPO value parameters, and the configuration digest against either the serialized configuration record or its normalized typed form. A valid older record may therefore acquire newly introduced defaults without being rejected or losing its original digest. Same-run resumption requires the recorded configuration. A derived run may change future training settings but rejects changes to the selected algorithm, task vocabulary, completion protocol, model architecture, master seed, or ordered curriculum stages.
 
-After validation, resumption restores the current and reference actors, optional value head, optimizer, curriculum state, named random streams, and applicable Torch device random state before producing new experience. A changed compatible optimizer configuration in a derived run is applied explicitly after restoring its accumulated state.
+By default, resumption restores the current and reference actors, optional value
+head, optimizer, curriculum state, named random streams, and applicable Torch
+device random state before producing new experience. An explicitly RNG-forked
+derived run instead preserves the learned, optimizer, and curriculum state while
+initializing fresh named and Torch random states from its recorded override
+seed. A changed compatible optimizer configuration in a derived run is applied
+explicitly after restoring its accumulated state.

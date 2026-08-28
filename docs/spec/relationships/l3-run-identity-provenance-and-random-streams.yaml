@@ -113,6 +113,7 @@ covers:
             parent_run_id: str | None = None,
             parent_checkpoint: str | None = None,
             configuration_differences: Sequence[str] = (),
+            rng_seed_override: int | None = None,
         ) -> InitializedRun:
             """Create a fresh, self-identifying run directory before model construction."""
   - path: src/pure_rl_shortest_path/run.py
@@ -157,7 +158,16 @@ covers:
   - path: src/pure_rl_shortest_path/run.py
     selector:
       quote: |2-
-            seeds = derive_named_seeds(configuration.resolved.master_seed)
+            normalized_rng_seed = (
+                None
+                if rng_seed_override is None
+                else _seed(rng_seed_override, "rng_seed_override")
+            )
+            seeds = derive_named_seeds(
+                configuration.resolved.master_seed
+                if normalized_rng_seed is None
+                else normalized_rng_seed
+            )
             actual_command = tuple(command) if command is not None else tuple(sys.argv)
             provenance = RunProvenance(
                 run_id=identity,
@@ -180,6 +190,7 @@ covers:
                 parent_run_id=parent_run_id,
                 parent_checkpoint=parent_checkpoint,
                 configuration_differences=tuple(configuration_differences),
+                rng_seed_override=normalized_rng_seed,
             )
 
             (directory / "experiment.toml").write_bytes(configuration.source_bytes)
@@ -191,25 +202,6 @@ covers:
                 (directory / "source.patch").write_bytes(source.patch)
             return InitializedRun(directory, configuration, provenance)
 anchors:
-  - id: 019ff54c-87f7-72e1-8f31-e86875f1ded8
-    selector:
-      quote: |-
-        One declared master seed deterministically produces separately named random
-        streams for model initialization, training-problem construction, rollout
-        sampling, curriculum validation, evaluation-problem construction, and
-        evaluation sampling. Seed derivation is stable and does not depend on
-        process-local hashing. The resolved seeds are recorded explicitly so that
-        independence between streams can be inspected rather than inferred.
-    links:
-      - path: src/pure_rl_shortest_path/run.py
-        kind: contractual
-        code_anchor: 019ff54c-87f7-73fe-b0ac-f6c1f707cf09
-        selector:
-          quote: |2-
-                for name in SEED_STREAM_NAMES:
-                    material = f"pure-rl-shortest-path:v1:{seed}:{name}".encode("ascii")
-                    derived = int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
-                    result[name] = derived % (2**63)
   - id: 019ff54c-87f7-7362-892a-68215d752b86
     selector:
       quote: |-
@@ -257,6 +249,43 @@ anchors:
                 output_root.mkdir(parents=True, exist_ok=True)
                 directory = output_root / directory_name
                 directory.mkdir(exist_ok=False)
+  - id: 019ff54c-87f7-72e1-8f31-e86875f1ded8
+    selector:
+      quote: |-
+        One declared master seed deterministically produces separately named random
+        streams for model initialization, training-problem construction, rollout
+        sampling, curriculum validation, evaluation-problem construction, and
+        evaluation sampling. An explicitly derived resume may instead declare an RNG
+        fork seed, rederiving every named stream without changing the checkpoint's
+        learned, optimizer, or curriculum state. Seed derivation is stable and does not
+        depend on process-local hashing. The resolved seeds and any override are
+        recorded explicitly so that independence between streams can be inspected
+        rather than inferred.
+    links:
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 019ff54c-87f7-73fe-b0ac-f6c1f707cf09
+        selector:
+          quote: |2-
+                for name in SEED_STREAM_NAMES:
+                    material = f"pure-rl-shortest-path:v1:{seed}:{name}".encode("ascii")
+                    derived = int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
+                    result[name] = derived % (2**63)
+      - path: src/pure_rl_shortest_path/run.py
+        kind: contractual
+        code_anchor: 01a04909-143b-7b5a-a7b8-8b6d025133b0
+        selector:
+          quote: |2-
+                normalized_rng_seed = (
+                    None
+                    if rng_seed_override is None
+                    else _seed(rng_seed_override, "rng_seed_override")
+                )
+                seeds = derive_named_seeds(
+                    configuration.resolved.master_seed
+                    if normalized_rng_seed is None
+                    else normalized_rng_seed
+                )
 references:
   - id: 019ff54c-87f7-704a-b05e-fb972cc40380
     kind: contractual

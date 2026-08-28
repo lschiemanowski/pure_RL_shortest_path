@@ -1,6 +1,6 @@
 # Command-line run orchestration
 
-The command line exposes fresh training, checkpoint resumption, and checkpoint evaluation as distinct operations. Fresh training accepts one experiment TOML. Resumption accepts a checkpoint, an optional compatible TOML for an explicitly derived run, and an operational stopping-step override. Evaluation accepts a checkpoint and a separate evaluation TOML. Scientific settings are not duplicated as command-line flags.
+The command line exposes fresh training, checkpoint resumption, and checkpoint evaluation as distinct operations. Fresh training accepts one experiment TOML. Resumption accepts a checkpoint, an optional compatible TOML for an explicitly derived run, an operational stopping-step override, and an optional RNG-fork seed that is valid only for a derived run. Evaluation accepts a checkpoint and a separate evaluation TOML. Other scientific settings are not duplicated as command-line flags.
 
 Each training step samples curriculum problems, collects unconstrained on-policy completions, verifies them, and packs sampled actions. The selected algorithm then performs either the existing grouped GRPO update or PPO batch preparation followed by a clipped actor-value update. Scheduled reference refresh, representative completions, actor-only evaluation, curriculum gating, checkpoints, and evidence are shared.
 

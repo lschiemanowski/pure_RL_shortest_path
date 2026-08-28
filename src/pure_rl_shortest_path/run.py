@@ -673,6 +673,7 @@ class RunProvenance:
     parent_run_id: str | None = None
     parent_checkpoint: str | None = None
     configuration_differences: tuple[str, ...] = ()
+    rng_seed_override: int | None = None
 
 
 @dataclass(frozen=True)
@@ -723,6 +724,7 @@ def initialize_run(
     parent_run_id: str | None = None,
     parent_checkpoint: str | None = None,
     configuration_differences: Sequence[str] = (),
+    rng_seed_override: int | None = None,
 ) -> InitializedRun:
     """Create a fresh, self-identifying run directory before model construction."""
 
@@ -761,7 +763,16 @@ def initialize_run(
     directory = output_root / directory_name
     directory.mkdir(exist_ok=False)
 
-    seeds = derive_named_seeds(configuration.resolved.master_seed)
+    normalized_rng_seed = (
+        None
+        if rng_seed_override is None
+        else _seed(rng_seed_override, "rng_seed_override")
+    )
+    seeds = derive_named_seeds(
+        configuration.resolved.master_seed
+        if normalized_rng_seed is None
+        else normalized_rng_seed
+    )
     actual_command = tuple(command) if command is not None else tuple(sys.argv)
     provenance = RunProvenance(
         run_id=identity,
@@ -784,6 +795,7 @@ def initialize_run(
         parent_run_id=parent_run_id,
         parent_checkpoint=parent_checkpoint,
         configuration_differences=tuple(configuration_differences),
+        rng_seed_override=normalized_rng_seed,
     )
 
     (directory / "experiment.toml").write_bytes(configuration.source_bytes)
@@ -1144,6 +1156,7 @@ def restore_training_checkpoint(
     optimizer: torch.optim.Optimizer,
     random_streams: NamedRandomStreams,
     value_head: ValueHead | None = None,
+    restore_random_state: bool = True,
 ) -> tuple[CurriculumState, tuple[str, ...]]:
     differences = validate_resume_configuration(
         checkpoint, configuration, derived_run=derived_run
@@ -1156,16 +1169,17 @@ def restore_training_checkpoint(
     for parameter in reference.parameters():
         parameter.requires_grad_(False)
     optimizer.load_state_dict(checkpoint.payload["optimizer"])
-    random_streams.load_state_dict(checkpoint.payload["random_streams"])
-    torch.set_rng_state(checkpoint.payload["torch_rng_state"])
-    if torch.cuda.is_available() and "cuda_rng_state" in checkpoint.payload:
-        torch.cuda.set_rng_state_all(checkpoint.payload["cuda_rng_state"])
-    if (
-        torch.backends.mps.is_available()
-        and "mps_rng_state" in checkpoint.payload
-        and hasattr(torch.mps, "set_rng_state")
-    ):
-        torch.mps.set_rng_state(checkpoint.payload["mps_rng_state"])
+    if restore_random_state:
+        random_streams.load_state_dict(checkpoint.payload["random_streams"])
+        torch.set_rng_state(checkpoint.payload["torch_rng_state"])
+        if torch.cuda.is_available() and "cuda_rng_state" in checkpoint.payload:
+            torch.cuda.set_rng_state_all(checkpoint.payload["cuda_rng_state"])
+        if (
+            torch.backends.mps.is_available()
+            and "mps_rng_state" in checkpoint.payload
+            and hasattr(torch.mps, "set_rng_state")
+        ):
+            torch.mps.set_rng_state(checkpoint.payload["mps_rng_state"])
     return checkpoint.curriculum_state, differences
 
 
@@ -1432,6 +1446,7 @@ def execute_training(
     checkpoint: LoadedCheckpoint | None = None,
     derived_run: bool = False,
     max_steps_override: int | None = None,
+    restore_random_state: bool = True,
 ) -> TrainingRunResult:
     """Run or resume the complete on-policy curriculum training protocol."""
 
@@ -1454,6 +1469,7 @@ def execute_training(
             optimizer=optimizer,
             random_streams=streams,
             value_head=value_head,
+            restore_random_state=restore_random_state,
         )
         _apply_optimizer_configuration(optimizer, configuration.optimizer)
         step = checkpoint.step
@@ -1476,6 +1492,8 @@ def execute_training(
             "parent_checkpoint": str(checkpoint.path) if checkpoint else None,
             "configuration_differences": list(differences),
             "derived_run": derived_run,
+            "random_state_restored": checkpoint is not None
+            and restore_random_state,
         },
     )
 
@@ -1748,6 +1766,7 @@ def resume_training_run(
     source_repository: str | Path,
     configuration_path: str | Path | None = None,
     max_steps: int | None = None,
+    rng_seed: int | None = None,
     command: Sequence[str] | None = None,
 ) -> TrainingRunResult:
     checkpoint = load_training_checkpoint(checkpoint_path)
@@ -1760,6 +1779,12 @@ def resume_training_run(
     seeds = source_provenance.get("seeds")
     if not isinstance(seeds, dict):
         raise ValueError("run provenance has no named random seeds")
+
+    normalized_rng_seed = (
+        None if rng_seed is None else _seed(rng_seed, "rng_seed")
+    )
+    if normalized_rng_seed is not None and configuration_path is None:
+        raise ValueError("--rng-seed requires --config to create a derived run")
 
     if configuration_path is None:
         source = inspect_source_provenance(source_repository)
@@ -1800,10 +1825,12 @@ def resume_training_run(
             parent_run_id=checkpoint.run_id,
             parent_checkpoint=str(checkpoint.path),
             configuration_differences=differences,
+            rng_seed_override=normalized_rng_seed,
         )
         run_directory = initialized.directory
         run_id = initialized.provenance.run_id
         configuration = requested.resolved
+        seeds = initialized.provenance.seeds
         derived_run = True
     return execute_training(
         run_directory=run_directory,
@@ -1813,6 +1840,7 @@ def resume_training_run(
         checkpoint=checkpoint,
         derived_run=derived_run,
         max_steps_override=max_steps,
+        restore_random_state=normalized_rng_seed is None,
     )
 
 
