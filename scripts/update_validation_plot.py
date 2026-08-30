@@ -194,12 +194,36 @@ def run_lineage(run_directory: Path) -> tuple[Path, ...]:
     return tuple(reversed(newest_to_oldest))
 
 
+def resumed_from_step(run_directory: Path) -> int | None:
+    """Return the checkpoint step at which a derived run branched."""
+
+    for record in _json_records(run_directory / "metrics.jsonl"):
+        if record.get("kind") == "run_resumed":
+            step = record.get("step")
+            if isinstance(step, int):
+                return step
+    return None
+
+
+def _lineage_cutoffs(
+    run_directories: tuple[Path, ...],
+) -> tuple[int | None, ...]:
+    return tuple(
+        resumed_from_step(child) for child in run_directories[1:]
+    ) + (None,)
+
+
 def load_lineage_validation_points(
     run_directories: Iterable[Path],
 ) -> tuple[ValidationPoint, ...]:
+    directories = tuple(run_directories)
     by_step: dict[int, ValidationPoint] = {}
-    for run_directory in run_directories:
+    for run_directory, maximum_step in zip(
+        directories, _lineage_cutoffs(directories), strict=True
+    ):
         for point in load_validation_points(run_directory / "metrics.jsonl"):
+            if maximum_step is not None and point.step > maximum_step:
+                continue
             by_step[point.step] = point
     return tuple(by_step[step] for step in sorted(by_step))
 
@@ -207,11 +231,16 @@ def load_lineage_validation_points(
 def load_lineage_transitions(
     run_directories: Iterable[Path],
 ) -> tuple[CurriculumTransition, ...]:
+    directories = tuple(run_directories)
     by_step: dict[int, CurriculumTransition] = {}
-    for run_directory in run_directories:
+    for run_directory, maximum_step in zip(
+        directories, _lineage_cutoffs(directories), strict=True
+    ):
         for transition in load_curriculum_transitions(
             run_directory / "metrics.jsonl"
         ):
+            if maximum_step is not None and transition.step > maximum_step:
+                continue
             by_step[transition.step] = transition
     return tuple(by_step[step] for step in sorted(by_step))
 

@@ -1,0 +1,7 @@
+[Unit]
+Description=Update half-learning-rate pure-RL validation plot
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/lothar/workspace/pure_RL_shortest_path
+ExecStart=/home/lothar/.pyenv/versions/fresh/bin/python scripts/update_validation_plot.py --runs-root runs --experiment-name deep12-grpo-full-vocabulary-valid-quarter-gen384-micro128-past06-lr15e5 --output runs/deep12-grpo-full-vocabulary-validation-lr15e5-from118000.svg --png-output runs/deep12-grpo-full-vocabulary-validation-lr15e5-from118000.png

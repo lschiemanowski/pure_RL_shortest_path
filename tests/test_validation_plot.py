@@ -212,34 +212,42 @@ class ValidationPlotTests(unittest.TestCase):
             checkpoint = parent / "checkpoints" / "interruption.pt"
             checkpoint.write_bytes(b"checkpoint")
             (parent / "metrics.jsonl").write_text(
-                json.dumps(
-                    {
-                        "kind": "evaluation",
-                        "step": 100,
-                        "frontier": 0,
-                        "metrics": {
-                            "example_count": 256,
-                            "format_success_rate": 0.1,
-                            "valid_path_success_rate": 0.05,
-                            "shortest_path_success_rate": 0.025,
-                        },
-                    }
+                "\n".join(
+                    json.dumps(
+                        {
+                            "kind": "evaluation",
+                            "step": step,
+                            "frontier": 0,
+                            "metrics": {
+                                "example_count": 256,
+                                "format_success_rate": rate,
+                                "valid_path_success_rate": rate / 2,
+                                "shortest_path_success_rate": rate / 4,
+                            },
+                        }
+                    )
+                    for step, rate in ((100, 0.1), (300, 0.3))
                 ),
                 encoding="utf-8",
             )
             (child / "metrics.jsonl").write_text(
-                json.dumps(
-                    {
-                        "kind": "evaluation",
-                        "step": 200,
-                        "frontier": 0,
-                        "metrics": {
-                            "example_count": 256,
-                            "format_success_rate": 0.2,
-                            "valid_path_success_rate": 0.1,
-                            "shortest_path_success_rate": 0.05,
-                        },
-                    }
+                "\n".join(
+                    (
+                        json.dumps({"kind": "run_resumed", "step": 200}),
+                        json.dumps(
+                            {
+                                "kind": "evaluation",
+                                "step": 200,
+                                "frontier": 0,
+                                "metrics": {
+                                    "example_count": 256,
+                                    "format_success_rate": 0.2,
+                                    "valid_path_success_rate": 0.1,
+                                    "shortest_path_success_rate": 0.05,
+                                },
+                            }
+                        ),
+                    )
                 ),
                 encoding="utf-8",
             )
