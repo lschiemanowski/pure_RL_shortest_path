@@ -1,0 +1,619 @@
+id: 01a060e7-78bb-7821-9084-1936144bfe26
+description: docs/spec/nodes/l3-reasoning-prefix-intervention-evaluation.md
+level: L3
+scope: pure-rl-shortest-path/experiment-protocol-and-evidence/independent-evaluation/reasoning-prefix-intervention-evaluation
+realization: implemented
+parent: 019ff06a-a006-77b8-a6df-8cd50fedb55e
+covers:
+  - path: src/pure_rl_shortest_path/prefix_readout.py
+anchors:
+  - id: 01a06100-8890-7c4f-9db2-f307cf89077f
+    selector:
+      quote: A reasoning-prefix intervention study measures when an ordinarily generated reasoning
+        trace first supports a successful answer. It begins with one unmodified completion
+        for every problem in a declared independent evaluation set. For each baseline completion
+        whose reasoning segment parses, the study selects every prefix that satisfies the
+        policy's minimum reasoning length and ends in a node token. A restart marker alone
+        is not an eligible boundary.
+    links:
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-7330-a6fd-5819c0c4617c
+        selector:
+          quote: |-
+            def eligible_reasoning_prefixes(
+                completion: Sequence[int],
+                vocabulary: Vocabulary,
+                minimum_reason_tokens: int,
+            ) -> tuple[ReasoningPrefixBoundary, ...]:
+                """Return every valid node-ending boundary from a parsed baseline trace."""
+
+                if minimum_reason_tokens < 1:
+                    raise ValueError("minimum_reason_tokens must be positive")
+                parsed = parse_completion(completion, vocabulary, minimum_reason_tokens)
+                if not parsed.format_ok:
+                    return ()
+                boundaries: list[ReasoningPrefixBoundary] = []
+                walk_index = 0
+                follows_restart = False
+                for index, token in enumerate(parsed.reasoning_tokens):
+                    if token == JUMP:
+                        walk_index += 1
+                        follows_restart = True
+                        continue
+                    if vocabulary.token_node(token) is None:
+                        raise AssertionError("parsed reasoning unexpectedly contains a non-node token")
+                    token_count = index + 1
+                    if token_count >= minimum_reason_tokens:
+                        boundaries.append(
+                            ReasoningPrefixBoundary(
+                                ordinal=len(boundaries),
+                                reasoning_token_count=token_count,
+                                walk_index=walk_index,
+                                follows_restart=follows_restart,
+                                prefix_tokens=tuple(parsed.reasoning_tokens[:token_count]),
+                            )
+                        )
+                    follows_restart = False
+                return tuple(boundaries)
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-7f99-912d-548aa03cef78
+        selector:
+          quote: |-
+            def execute_prefix_readout(
+                checkpoint_path: str | Path,
+                configuration_path: str | Path,
+                *,
+                source_repository: str | Path = ".",
+                command: Sequence[str] | None = None,
+            ) -> PrefixReadoutStudyResult:
+                """Run a declared ordinary baseline and its paired forced-prefix readouts."""
+
+                config_path = Path(configuration_path).expanduser().resolve()
+                config_bytes = config_path.read_bytes()
+                config = load_prefix_readout_config(config_path)
+                checkpoint_digest = validate_checkpoint_digest(
+                    checkpoint_path, config.checkpoint_sha256
+                )
+                checkpoint = load_training_checkpoint(checkpoint_path)
+                if (
+                    config.problem.problem_config.vertices
+                    > checkpoint.configuration.vocabulary.node_label_count
+                ):
+                    raise ValueError("declared problem set exceeds the checkpoint vocabulary")
+                source = inspect_source_provenance(source_repository)
+                if source.dirty and not config.runtime.allow_dirty_source:
+                    summary = ", ".join(source.status[:5])
+                    if len(source.status) > 5:
+                        summary += ", ..."
+                    raise RuntimeError(
+                        "source tree is dirty; commit changes or set "
+                        f"runtime.allow_dirty_source=true ({summary})"
+                    )
+
+                device = torch.device(resolve_runtime_device(config.runtime.device))
+                autocast_dtype = resolve_autocast_dtype(config.runtime.dtype, device)
+                policy = Transformer(checkpoint.configuration.model).to(device)
+                policy.load_state_dict(checkpoint.payload["policy"])
+                policy.eval()
+                for parameter in policy.parameters():
+                    parameter.requires_grad_(False)
+
+                problem_set = generate_evaluation_problem_set(
+                    config.problem.problem_config,
+                    checkpoint.configuration.vocabulary,
+                    config.problem.example_count,
+                    config.problem.generation_seed,
+                )
+                protocol = EvaluationProtocol(
+                    policy_checkpoint=str(checkpoint.path),
+                    sampling=config.baseline_sampling,
+                    minimum_reason_tokens=checkpoint.configuration.minimum_reason_tokens,
+                )
+                baseline = run_evaluation(
+                    policy,
+                    protocol,
+                    problem_set,
+                    checkpoint.configuration.vocabulary,
+                    device=device,
+                    autocast_dtype=autocast_dtype,
+                )
+                requests = _build_readout_requests(
+                    baseline,
+                    checkpoint.configuration.vocabulary,
+                    checkpoint.configuration.minimum_reason_tokens,
+                    checkpoint.configuration.model.max_context_length,
+                    config.readout_sampling.max_new_tokens,
+                )
+                readouts = _run_readouts(
+                    policy,
+                    requests,
+                    config.readout_sampling,
+                    checkpoint.configuration.vocabulary,
+                    checkpoint.configuration.minimum_reason_tokens,
+                    device=device,
+                    autocast_dtype=autocast_dtype,
+                )
+
+                study_id = str(uuid.uuid4())
+                timestamp = datetime.now(timezone.utc)
+                directory_name = (
+                    f"{_slug(config.name)}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}_{study_id[:8]}"
+                )
+                directory = create_artifact_directory(config.output_root, directory_name)
+                config_digest = hashlib.sha256(config_bytes).hexdigest()
+                resolved_config = _plain_data(config)
+                assert isinstance(resolved_config, dict)
+                _atomic_write_json(directory / "resolved-config.json", resolved_config)
+                _atomic_write_json(
+                    directory / "provenance.json",
+                    {
+                        "schema_version": EVIDENCE_SCHEMA_VERSION,
+                        "study_id": study_id,
+                        "study_name": config.name,
+                        "started_at_utc": timestamp.isoformat().replace("+00:00", "Z"),
+                        "command": tuple(command) if command is not None else tuple(sys.argv),
+                        "configuration_source": str(config_path),
+                        "configuration_source_sha256": config_digest,
+                        "resolved_configuration_sha256": hashlib.sha256(
+                            _canonical_json_bytes(resolved_config)
+                        ).hexdigest(),
+                        "checkpoint": str(checkpoint.path),
+                        "checkpoint_sha256": checkpoint_digest,
+                        "checkpoint_run_id": checkpoint.run_id,
+                        "checkpoint_step": checkpoint.step,
+                        "checkpoint_purpose": checkpoint.purpose,
+                        "checkpoint_configuration_sha256": checkpoint.configuration_sha256,
+                        "problem_set_identity": problem_set.identity,
+                        "source_revision": source.revision,
+                        "source_dirty": source.dirty,
+                        "source_status": source.status,
+                        "source_patch_sha256": source.patch_sha256,
+                        "python_version": platform.python_version(),
+                        "torch_version": str(torch.__version__),
+                        "cuda_version": torch.version.cuda,
+                        "requested_device": config.runtime.device,
+                        "device": str(device),
+                        "dtype": config.runtime.dtype,
+                        "policy_mode": "evaluation",
+                        "policy_parameters_trainable": False,
+                        "optimizer_loaded": False,
+                        "reference_policy_loaded": False,
+                        "curriculum_state_applied": False,
+                    },
+                )
+                if source.patch:
+                    (directory / "source.patch").write_bytes(source.patch)
+                _write_json_lines(
+                    directory / "baselines.jsonl",
+                    tuple(
+                        _baseline_record(
+                            study_id, index, baseline, checkpoint.configuration.vocabulary
+                        )
+                        for index in range(len(baseline.cases))
+                    ),
+                )
+                _write_json_lines(
+                    directory / "readouts.jsonl",
+                    tuple(
+                        _readout_record(
+                            study_id,
+                            baseline.problem_set_identity,
+                            readout,
+                            checkpoint.configuration.vocabulary,
+                        )
+                        for readout in readouts
+                    ),
+                )
+                _atomic_write_json(
+                    directory / "summary.json",
+                    {
+                        "schema_version": EVIDENCE_SCHEMA_VERSION,
+                        "study_id": study_id,
+                        "study_name": config.name,
+                        "problem_set_identity": baseline.problem_set_identity,
+                        "ordinary_baseline": baseline.metrics,
+                        "intervention": _intervention_summary(baseline, readouts),
+                        "interpretation": {
+                            "ordinary_and_intervened_results_are_separate": True,
+                            "interventions_are_not_unmodified_policy_performance": True,
+                        },
+                    },
+                )
+                return PrefixReadoutStudyResult(directory, study_id, baseline, readouts)
+  - id: 01a06100-8890-7d9f-822f-a83f26827d05
+    selector:
+      quote: At each eligible boundary, the study retains the baseline reasoning prefix, appends
+        the reasoning terminator and answer-begin marker, and then generates an unconstrained
+        suffix under the study's declared greedy sampling configuration. The reconstructed
+        completion is verified under the same task semantics as ordinary evaluation. The policy
+        remains in evaluation mode, receives no parameter update, and is loaded without an
+        optimizer, reference policy, or curriculum state.
+    links:
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-7073-bfe1-3cb1b37061a4
+        selector:
+          quote: |-
+            def _build_readout_requests(
+                baseline: EvaluationResult,
+                vocabulary: Vocabulary,
+                minimum_reason_tokens: int,
+                maximum_context_length: int,
+                maximum_new_tokens: int,
+            ) -> tuple[PrefixReadoutRequest, ...]:
+                requests = []
+                forced = (END_REASON, BEGIN_ANSWER)
+                for problem_index, case in enumerate(baseline.cases):
+                    completion = case.completion.completion
+                    for boundary in eligible_reasoning_prefixes(
+                        completion, vocabulary, minimum_reason_tokens
+                    ):
+                        prompt = case.completion.example.prompt + boundary.prefix_tokens + forced
+                        available = maximum_context_length - len(prompt)
+                        requests.append(
+                            PrefixReadoutRequest(
+                                problem_index=problem_index,
+                                example=case.completion.example,
+                                baseline_completion=completion,
+                                boundary=boundary,
+                                prompt_tokens=prompt,
+                                generation_budget=max(0, min(maximum_new_tokens, available)),
+                            )
+                        )
+                return tuple(requests)
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-7987-a842-0d3fe91458f4
+        selector:
+          quote: |-
+            def _run_readouts(
+                model: Transformer,
+                requests: Sequence[PrefixReadoutRequest],
+                sampling: EvaluationSamplingConfig,
+                vocabulary: Vocabulary,
+                minimum_reason_tokens: int,
+                *,
+                device: torch.device,
+                autocast_dtype: torch.dtype | None,
+            ) -> tuple[PrefixReadoutResult, ...]:
+                results: list[PrefixReadoutResult] = []
+                by_budget: dict[int, list[PrefixReadoutRequest]] = {}
+                for request in requests:
+                    by_budget.setdefault(request.generation_budget, []).append(request)
+                for budget in sorted(by_budget):
+                    group = by_budget[budget]
+                    if budget == 0:
+                        generated = ((),) * len(group)
+                    else:
+                        generated = generate_tokens(
+                            model,
+                            [request.prompt_tokens for request in group],
+                            max_new_tokens=budget,
+                            batch_size=sampling.batch_size,
+                            pad_token=PAD,
+                            eos_token=EOS,
+                            device=device,
+                            select_next=lambda logits: select_evaluation_tokens(logits, sampling),
+                            autocast_dtype=autocast_dtype,
+                        )
+                    for request, suffix in zip(group, generated):
+                        reconstructed = (
+                            request.boundary.prefix_tokens
+                            + (END_REASON, BEGIN_ANSWER)
+                            + tuple(suffix)
+                        )
+                        results.append(
+                            PrefixReadoutResult(
+                                request=request,
+                                generated_suffix=tuple(suffix),
+                                reconstructed_completion=reconstructed,
+                                terminated_by_eos=bool(suffix and suffix[-1] == EOS),
+                                outcome=verify_completion(
+                                    request.example,
+                                    reconstructed,
+                                    vocabulary,
+                                    minimum_reason_tokens,
+                                ),
+                            )
+                        )
+                return tuple(
+                    sorted(
+                        results,
+                        key=lambda result: (
+                            result.request.problem_index,
+                            result.request.boundary.ordinal,
+                        ),
+                    )
+                )
+  - id: 01a06100-8890-77fe-b255-5252612a28cc
+    selector:
+      quote: Every intervention remains paired with its ordinary baseline. The study records
+        the checkpoint path and file digest, embedded run and step identities, resolved study
+        configuration, source state, problem-set identity, ordered problem index, retained
+        prefix and boundary position, forced markers, generated suffix, termination condition,
+        and deterministic verifier outcome. Baselines without an eligible boundary remain
+        explicit. Results summarize ordinary and intervened outcomes separately and never
+        present prefix interventions as unmodified policy performance. Each invocation writes
+        a new artifact directory and refuses to overwrite existing evidence.
+    links:
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-713c-876b-7ee9308369d2
+        selector:
+          quote: |-
+            def _baseline_record(
+                study_id: str,
+                problem_index: int,
+                result: EvaluationResult,
+                vocabulary: Vocabulary,
+            ) -> dict[str, object]:
+                case = result.cases[problem_index]
+                boundaries = eligible_reasoning_prefixes(
+                    case.completion.completion,
+                    vocabulary,
+                    result.protocol.minimum_reason_tokens,
+                )
+                return {
+                    "schema_version": EVIDENCE_SCHEMA_VERSION,
+                    "kind": "ordinary_baseline",
+                    "study_id": study_id,
+                    "problem_set_identity": result.problem_set_identity,
+                    "problem_index": problem_index,
+                    "problem": case.completion.example,
+                    "prompt_tokens": case.completion.example.prompt,
+                    "completion_tokens": case.completion.completion,
+                    "completion_text": vocabulary.render(case.completion.completion),
+                    "terminated_by_eos": case.completion.terminated_by_eos,
+                    "outcome": case.outcome,
+                    "eligible_boundary_count": len(boundaries),
+                }
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-7327-a0c4-88bf10328ad0
+        selector:
+          quote: |-
+            def create_artifact_directory(output_root: str | Path, study_id: str) -> Path:
+                """Create one evidence directory without allowing an existing path."""
+
+                root = Path(output_root).expanduser().resolve()
+                root.mkdir(parents=True, exist_ok=True)
+                directory = root / _nonempty_string(study_id, "study_id")
+                directory.mkdir(exist_ok=False)
+                return directory
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-7596-9d6a-cd08d29728fb
+        selector:
+          quote: |-
+            def validate_checkpoint_digest(path: str | Path, expected_sha256: str) -> str:
+                """Hash checkpoint bytes and reject identity mismatches before deserialization."""
+
+                checkpoint_path = Path(path).expanduser().resolve()
+                expected = expected_sha256.lower()
+                if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                    raise ValueError("expected checkpoint digest must be 64 hexadecimal digits")
+                digest = hashlib.sha256()
+                with checkpoint_path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                actual = digest.hexdigest()
+                if actual != expected:
+                    raise ValueError(
+                        f"checkpoint digest mismatch: expected {expected}, observed {actual}"
+                    )
+                return actual
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8890-7ddc-8c6a-af3f8789950b
+        selector:
+          quote: |-
+            def _readout_record(
+                study_id: str,
+                problem_set_identity: str,
+                result: PrefixReadoutResult,
+                vocabulary: Vocabulary,
+            ) -> dict[str, object]:
+                request = result.request
+                return {
+                    "schema_version": EVIDENCE_SCHEMA_VERSION,
+                    "kind": "reasoning_prefix_intervention",
+                    "study_id": study_id,
+                    "problem_set_identity": problem_set_identity,
+                    "problem_index": request.problem_index,
+                    "baseline_completion_tokens": request.baseline_completion,
+                    "boundary": request.boundary,
+                    "retained_prefix_text": vocabulary.render(request.boundary.prefix_tokens),
+                    "forced_tokens": (END_REASON, BEGIN_ANSWER),
+                    "forced_text": vocabulary.render((END_REASON, BEGIN_ANSWER)),
+                    "generation_prompt_tokens": request.prompt_tokens,
+                    "generation_budget": request.generation_budget,
+                    "generated_suffix_tokens": result.generated_suffix,
+                    "generated_suffix_text": vocabulary.render(result.generated_suffix),
+                    "reconstructed_completion_tokens": result.reconstructed_completion,
+                    "reconstructed_completion_text": vocabulary.render(
+                        result.reconstructed_completion
+                    ),
+                    "termination_condition": (
+                        "eos"
+                        if result.terminated_by_eos
+                        else "no_context_capacity"
+                        if request.generation_budget == 0
+                        else "token_budget"
+                    ),
+                    "outcome": result.outcome,
+                }
+      - path: src/pure_rl_shortest_path/prefix_readout.py
+        kind: contractual
+        code_anchor: 01a06100-8891-74dc-bc6d-512b0d88fc75
+        selector:
+          quote: |-
+            def execute_prefix_readout(
+                checkpoint_path: str | Path,
+                configuration_path: str | Path,
+                *,
+                source_repository: str | Path = ".",
+                command: Sequence[str] | None = None,
+            ) -> PrefixReadoutStudyResult:
+                """Run a declared ordinary baseline and its paired forced-prefix readouts."""
+
+                config_path = Path(configuration_path).expanduser().resolve()
+                config_bytes = config_path.read_bytes()
+                config = load_prefix_readout_config(config_path)
+                checkpoint_digest = validate_checkpoint_digest(
+                    checkpoint_path, config.checkpoint_sha256
+                )
+                checkpoint = load_training_checkpoint(checkpoint_path)
+                if (
+                    config.problem.problem_config.vertices
+                    > checkpoint.configuration.vocabulary.node_label_count
+                ):
+                    raise ValueError("declared problem set exceeds the checkpoint vocabulary")
+                source = inspect_source_provenance(source_repository)
+                if source.dirty and not config.runtime.allow_dirty_source:
+                    summary = ", ".join(source.status[:5])
+                    if len(source.status) > 5:
+                        summary += ", ..."
+                    raise RuntimeError(
+                        "source tree is dirty; commit changes or set "
+                        f"runtime.allow_dirty_source=true ({summary})"
+                    )
+
+                device = torch.device(resolve_runtime_device(config.runtime.device))
+                autocast_dtype = resolve_autocast_dtype(config.runtime.dtype, device)
+                policy = Transformer(checkpoint.configuration.model).to(device)
+                policy.load_state_dict(checkpoint.payload["policy"])
+                policy.eval()
+                for parameter in policy.parameters():
+                    parameter.requires_grad_(False)
+
+                problem_set = generate_evaluation_problem_set(
+                    config.problem.problem_config,
+                    checkpoint.configuration.vocabulary,
+                    config.problem.example_count,
+                    config.problem.generation_seed,
+                )
+                protocol = EvaluationProtocol(
+                    policy_checkpoint=str(checkpoint.path),
+                    sampling=config.baseline_sampling,
+                    minimum_reason_tokens=checkpoint.configuration.minimum_reason_tokens,
+                )
+                baseline = run_evaluation(
+                    policy,
+                    protocol,
+                    problem_set,
+                    checkpoint.configuration.vocabulary,
+                    device=device,
+                    autocast_dtype=autocast_dtype,
+                )
+                requests = _build_readout_requests(
+                    baseline,
+                    checkpoint.configuration.vocabulary,
+                    checkpoint.configuration.minimum_reason_tokens,
+                    checkpoint.configuration.model.max_context_length,
+                    config.readout_sampling.max_new_tokens,
+                )
+                readouts = _run_readouts(
+                    policy,
+                    requests,
+                    config.readout_sampling,
+                    checkpoint.configuration.vocabulary,
+                    checkpoint.configuration.minimum_reason_tokens,
+                    device=device,
+                    autocast_dtype=autocast_dtype,
+                )
+
+                study_id = str(uuid.uuid4())
+                timestamp = datetime.now(timezone.utc)
+                directory_name = (
+                    f"{_slug(config.name)}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}_{study_id[:8]}"
+                )
+                directory = create_artifact_directory(config.output_root, directory_name)
+                config_digest = hashlib.sha256(config_bytes).hexdigest()
+                resolved_config = _plain_data(config)
+                assert isinstance(resolved_config, dict)
+                _atomic_write_json(directory / "resolved-config.json", resolved_config)
+                _atomic_write_json(
+                    directory / "provenance.json",
+                    {
+                        "schema_version": EVIDENCE_SCHEMA_VERSION,
+                        "study_id": study_id,
+                        "study_name": config.name,
+                        "started_at_utc": timestamp.isoformat().replace("+00:00", "Z"),
+                        "command": tuple(command) if command is not None else tuple(sys.argv),
+                        "configuration_source": str(config_path),
+                        "configuration_source_sha256": config_digest,
+                        "resolved_configuration_sha256": hashlib.sha256(
+                            _canonical_json_bytes(resolved_config)
+                        ).hexdigest(),
+                        "checkpoint": str(checkpoint.path),
+                        "checkpoint_sha256": checkpoint_digest,
+                        "checkpoint_run_id": checkpoint.run_id,
+                        "checkpoint_step": checkpoint.step,
+                        "checkpoint_purpose": checkpoint.purpose,
+                        "checkpoint_configuration_sha256": checkpoint.configuration_sha256,
+                        "problem_set_identity": problem_set.identity,
+                        "source_revision": source.revision,
+                        "source_dirty": source.dirty,
+                        "source_status": source.status,
+                        "source_patch_sha256": source.patch_sha256,
+                        "python_version": platform.python_version(),
+                        "torch_version": str(torch.__version__),
+                        "cuda_version": torch.version.cuda,
+                        "requested_device": config.runtime.device,
+                        "device": str(device),
+                        "dtype": config.runtime.dtype,
+                        "policy_mode": "evaluation",
+                        "policy_parameters_trainable": False,
+                        "optimizer_loaded": False,
+                        "reference_policy_loaded": False,
+                        "curriculum_state_applied": False,
+                    },
+                )
+                if source.patch:
+                    (directory / "source.patch").write_bytes(source.patch)
+                _write_json_lines(
+                    directory / "baselines.jsonl",
+                    tuple(
+                        _baseline_record(
+                            study_id, index, baseline, checkpoint.configuration.vocabulary
+                        )
+                        for index in range(len(baseline.cases))
+                    ),
+                )
+                _write_json_lines(
+                    directory / "readouts.jsonl",
+                    tuple(
+                        _readout_record(
+                            study_id,
+                            baseline.problem_set_identity,
+                            readout,
+                            checkpoint.configuration.vocabulary,
+                        )
+                        for readout in readouts
+                    ),
+                )
+                _atomic_write_json(
+                    directory / "summary.json",
+                    {
+                        "schema_version": EVIDENCE_SCHEMA_VERSION,
+                        "study_id": study_id,
+                        "study_name": config.name,
+                        "problem_set_identity": baseline.problem_set_identity,
+                        "ordinary_baseline": baseline.metrics,
+                        "intervention": _intervention_summary(baseline, readouts),
+                        "interpretation": {
+                            "ordinary_and_intervened_results_are_separate": True,
+                            "interventions_are_not_unmodified_policy_performance": True,
+                        },
+                    },
+                )
+                return PrefixReadoutStudyResult(directory, study_id, baseline, readouts)
+references:
+  - id: 019ff0e2-9b56-7bfd-8466-622e503f5644
+    kind: contractual
+  - id: 019ff503-40c8-728e-87ea-7504bd8e08bc
+    kind: contractual
+  - id: 019ff503-40c8-7f88-851d-5f0e7dc42b95
+    kind: contractual
