@@ -1,0 +1,28 @@
+schema_version = 1
+name = "stage8-step127000-prefix-readout"
+checkpoint_sha256 = "af0ee81bbe261140fd73f00e09e59e256ec7fff72f65a2d080152826392ab7e0"
+
+[baseline_sampling]
+max_new_tokens = 384
+batch_size = 128
+
+[readout_sampling]
+max_new_tokens = 64
+batch_size = 512
+
+[set]
+vertices = 80
+edges = 112
+min_distance = 5
+max_distance = 6
+generation_attempts = 100
+example_count = 256
+generation_seed = 12700020260902
+
+[artifacts]
+output_root = "../evaluations"
+
+[runtime]
+device = "cuda"
+dtype = "bfloat16"
+allow_dirty_source = false
