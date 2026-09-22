@@ -1,5 +1,5 @@
 schema_version = 1
-name = "deep12-stage8-fixed-step114500-gen384"
+name = "stage-8-greedy"
 
 [sampling]
 max_new_tokens = 384
@@ -13,11 +13,11 @@ edges = 112
 min_distance = 5
 max_distance = 6
 example_count = 256
-generation_seed = 80097500
+generation_seed = 12700020260902
 
 [artifacts]
-output_root = "/home/lothar/workspace/pure_RL_shortest_path/evaluations"
+output_root = "../evaluations"
 
 [runtime]
-device = "cpu"
+device = "cuda"
 dtype = "bfloat16"

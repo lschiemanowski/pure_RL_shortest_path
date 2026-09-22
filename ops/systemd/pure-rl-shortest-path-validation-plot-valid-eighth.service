@@ -1,7 +1,0 @@
-[Unit]
-Description=Update reduced-valid-loss pure-RL validation plot
-
-[Service]
-Type=oneshot
-WorkingDirectory=/home/lothar/workspace/pure_RL_shortest_path
-ExecStart=/home/lothar/.pyenv/versions/fresh/bin/python scripts/update_validation_plot.py --runs-root runs --experiment-name deep12-grpo-full-vocabulary-valid-eighth-gen384-micro128-past06-lr15e5 --output runs/deep12-grpo-full-vocabulary-validation-valid-eighth-from126500.svg --png-output runs/deep12-grpo-full-vocabulary-validation-valid-eighth-from126500.png

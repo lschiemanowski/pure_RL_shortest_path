@@ -1,5 +1,0 @@
-# Rollout sampling
-
-Rollout sampling receives training problems supplied by the experiment protocol and produces a declared number of policy completions for each problem. GRPO completions for the same problem form a comparison group; PPO permits one or more independent completions. Sampling uses the declared maximum completion length and terminates when the policy emits the termination symbol or reaches that limit. Training fixes temperature and top-p to one, so each token is drawn from the policy's complete softmax distribution.
-
-Token selection operates on the policy's complete next-token scores without task-specific legality masks, forced tokens, or post-hoc edits. Graph verification occurs only after a completion has been sampled and cannot influence token selection within that rollout. Each sampled action retains its rollout-time log probability; PPO rollouts additionally retain rollout-time scalar value estimates. Those statistics remain fixed while the selected optimizer reuses the on-policy batch.
