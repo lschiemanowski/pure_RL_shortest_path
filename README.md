@@ -10,6 +10,27 @@ Given an undirected, unweighted graph and a pair of nodes, the model generates
 walks through the graph as its CoT, followed by an answer path. A `JUMP` token
 allows it to start a new walk. The answer is checked against breadth-first search.
 
+For example, consider a graph with two routes from node 0 to node 4:
+`0–1–2–4` and `0–3–4`. The input is:
+
+```text
+BOS EDGES 0 1 1 2 2 4 0 3 3 4 QUERY 0 4 BEGIN_REASON 0
+```
+
+After `EDGES`, each pair of node labels describes an undirected edge.
+`QUERY 0 4` asks for a shortest path from 0 to 4. The input ends with
+`BEGIN_REASON 0`, supplying the starting node for the first reasoning walk.
+Each node label and each marker is a single token.
+
+One correct completion would be:
+
+```text
+1 2 4 JUMP 0 3 4 END_REASON BEGIN_ANSWER 0 3 4 END_ANSWER EOS
+```
+
+Here, the reasoning first follows `0–1–2–4`, then restarts at 0 and follows
+`0–3–4`. The final answer is `0–3–4`, a shortest path of length 2.
+
 ## Training
 
 We trained a model with 12 layers and 12.6M parameters using GRPO on randomly
