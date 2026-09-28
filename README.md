@@ -71,26 +71,6 @@ These steps come from the training logs across successive resumed runs, during
 which we adjusted training settings. Within stage 8, performance reached a
 plateau which we seemingly could not break.
 
-## Results
-
-At step 127,000, on 256 fresh graphs with 80 nodes, 112 edges, and shortest paths
-of length 5–6, greedy generation produced:
-
-| Outcome | Count | Rate |
-| --- | ---: | ---: |
-| Shortest path | 187/256 | 73.05% |
-| Valid path | 229/256 | 89.45% |
-
-The model also forgets earlier tasks. On the same one-edge test problems,
-success fell from 89% to 34% between steps 96,500 and 114,000.
-
-Forcing an answer at earlier points in the reasoning trace recovered a shortest
-path in 18 of 55 eligible cases where ordinary generation failed. This required
-trying multiple stopping points; it is not an improved ordinary accuracy score.
-A separate study of an earlier checkpoint identified parts of goal recognition,
-restart behavior, and walk control. We do not yet have a complete account of the
-learned search algorithm.
-
 ## How to run this
 
 You will need [uv](https://docs.astral.sh/uv/getting-started/installation/) and a
